@@ -16,8 +16,9 @@ def ssim_compare(img1_path, img2_path) :
     ssim_score, dif = ssim(img1, img2, full=True)
     return ssim_score
 
-ssim_val = 0
-for i in range(10):
-    ssim_val += ssim_compare(f'outputs/edges/edges_visible_{i}.png', f'outputs/edges/edges_thermal_{i}.png')
 
-print(ssim_val / 10)
+ssim_val = 0
+
+ssim_val += ssim_compare(f'outputs/edges_hed/edges_hed_thermal_three.png', f'outputs/edges_hed/edges_hed_example.png')
+
+print(ssim_val)

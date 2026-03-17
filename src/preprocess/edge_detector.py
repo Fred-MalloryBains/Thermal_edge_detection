@@ -43,7 +43,10 @@ def calculate_canny_percentile(image):
     edges = cv2.Canny(image, low, high)
     
     return edges
-
+for i in range(0,10):
+    print (f"Processing pair {i+1}/{len(pairs)}: {pairs[i][0].name} and {pairs[i][1].name}")
+    
+"""    
 for i in range (0,10):
     visible_path, thermal_path = pairs[i]
     therm_img = normalize_image(thermal_path)
@@ -54,3 +57,4 @@ for i in range (0,10):
     visible_edges = calculate_canny_percentile(vis_img)
     Image.fromarray(thermal_edges).save(f"outputs/edges_thermal_{i}.png")
     Image.fromarray(visible_edges).save(f"outputs/edges_visible_{i}.png")
+"""

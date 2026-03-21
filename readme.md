@@ -7,10 +7,14 @@ ControlNet, a conditioning constraint for stable diffusion. This project aims to
 
 ControlNet uses image-to-image translation, which relies on an edge map image input generated from the thermal image. In this project, HED (Hollistically Nested Edge detection) is used to generate the edge mappings. The preprocessing module uses openCV and a 2x2 CNN bridges the domain gap between the "blobs", the inputs for the DNN network, to construct an edge mapping.
 
-Logic for this is found in [/src/preprocess/edge_detector_hed.py] and is saved in [/outputs/edges_hed]
+Logic for this is found in [a relateive link](/src/preprocess/edge_detector_hed.py) and is saved in [a relative link](/outputs/edges_hed)
 
+Eg:
+![HED edge detection example](/outputs/edges_hed/edges_hed_example.png)
+
+<br>
 ## Reconsturction uses controlNet
 
 ControlNet reconstruction uses a pretrained stable diffusion model and edge detection to tranlsate the image into the VL domain. The prompt has been designed using a loss model for tokenisation using the evaluation metrics discussed below.
-
-The script for this is found in [/src/reconstruction_module/reconstruction_hed.py] and is saved in [/outputs/results]
+a
+The script for this is found in [a relative link](/src/reconstruction_module/reconstruction_hed.py) and is saved in [a relative link](/outputs/results)

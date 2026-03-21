@@ -5,8 +5,13 @@ import os
 from scipy import ndimage
 import numpy as np 
 from PIL import Image
+import matplotlib.pyplot as plt
+
 
 data_path = Path("/Volumes/Samsung_1TB/thermal_images/archive/").expanduser()
+
+## resolution of the thermal images?
+## prompt vague and specific - middle ground
 
 pairs = []
 
@@ -88,6 +93,8 @@ blob = cv2.dnn.blobFromImage(img, scalefactor=0.5, size=(W, H),
                              mean=(mean_pixel_values[0], mean_pixel_values[1], mean_pixel_values[2]),
                              swapRB= True, crop=True)
 
+blob_for_plot = np.moveaxis(blob[0,:,:,:], 0,2)
+plt.imshow(blob_for_plot)
 # set the blob as the input to the network and perform a forward pass
 # to compute the edges
 net.setInput(blob)

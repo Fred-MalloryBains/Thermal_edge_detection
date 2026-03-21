@@ -17,8 +17,12 @@ def ssim_compare(img1_path, img2_path) :
     return ssim_score
 
 
-ssim_val = 0
 
-ssim_val += ssim_compare(f'outputs/edges_hed/edges_hed_thermal_three.png', f'outputs/edges_hed/edges_hed_example.png')
+image = "outputs/I00451.jpg"
+reconstructed = ["outputs/hed_result_thermal_three.png", "outputs/hed_result.png"]
+ssim_val = ssim_compare(reconstructed[0], reconstructed[1])
 
 print(ssim_val)
+
+new_ssim_val = ssim_compare(image, reconstructed[0])
+print(new_ssim_val)

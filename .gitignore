@@ -2,3 +2,4 @@
 .obj/
 *.png
 *.jpg
+*.caffemodel

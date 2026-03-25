@@ -12,18 +12,16 @@ data_path = Path("/Volumes/Samsung_1TB/thermal_images/archive/").expanduser()
 
 ## resolution of the thermal images?
 ## prompt vague and specific - middle ground
+def get_pairs(data_path):
+    pairs = []
 
-pairs = []
-
-for visible_path in data_path.glob("set*/V*/visible/*.jpg"):
-    
-    thermal_path = visible_path.parents[1] / "lwir" / visible_path.name
-    
-    if thermal_path.exists():
-        pairs.append((visible_path, thermal_path))
-
-print("Total pairs:", len(pairs))
-print(pairs[:3])
+    for visible_path in data_path.glob("set*/V*/visible/*.jpg"):
+        
+        thermal_path = visible_path.parents[1] / "lwir" / visible_path.name
+        
+        if thermal_path.exists():
+            pairs.append((visible_path, thermal_path))
+    return pairs
 
 def preprocess_image_one(image):
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
@@ -75,31 +73,40 @@ for i in range(0,10):
     print (f"Processing pair {i+1}/{len(pairs)}: {pairs[i][0].name} and {pairs[i][1].name}")
  
 
+
+
 protoPath = "src/preprocess/hed_model/deploy.prototxt"
 modelPath = "src/preprocess/hed_model/hed_pretrained_bsds.caffemodel"
 
 net = cv2.dnn.readNetFromCaffe(protoPath, modelPath)
 
-
+def process_edge(img_path):
 # load the input image and grab its dimensions, for future use while defining the blob
-img = cv2.imread(str(pairs[0][1]), cv2.IMREAD_GRAYSCALE)  #Using the first thermal image as an example
-(H, W) = img.shape[:2]
+    img = cv2.imread(str(img_path), cv2.IMREAD_GRAYSCALE)  #Using the first thermal image as an example
+    (H, W) = img.shape[:2]
 
-img = preprocess_image_two(img)
+    img = preprocess_image_two(img)
 
 
-mean_pixel_values= np.average(img, axis = (0,1))
-blob = cv2.dnn.blobFromImage(img, scalefactor=0.5, size=(W, H),
-                             mean=(mean_pixel_values[0], mean_pixel_values[1], mean_pixel_values[2]),
-                             swapRB= True, crop=True)
+    mean_pixel_values= np.average(img, axis = (0,1))
+    blob = cv2.dnn.blobFromImage(img, scalefactor=0.5, size=(W, H),
+                                mean=(mean_pixel_values[0], mean_pixel_values[1], mean_pixel_values[2]),
+                                swapRB= True, crop=True)
 
-blob_for_plot = np.moveaxis(blob[0,:,:,:], 0,2)
-plt.imshow(blob_for_plot)
-# set the blob as the input to the network and perform a forward pass
-# to compute the edges
-net.setInput(blob)
-hed = net.forward()
-hed = hed[0,0,:,:]  #Drop the other axes 
-#hed = cv2.resize(hed[0, 0], (W, H))
-hed = (255 * hed).astype("uint8")  #rescale to 0-255
-Image.fromarray(hed).save("outputs/edges_hed/edges_hed_thermal_three.png")
+    blob_for_plot = np.moveaxis(blob[0,:,:,:], 0,2)
+    plt.imshow(blob_for_plot)
+    # set the blob as the input to the network and perform a forward pass
+    # to compute the edges
+    net.setInput(blob)
+    hed = net.forward()
+    hed = hed[0,0,:,:]  #Drop the other axes 
+    #hed = cv2.resize(hed[0, 0], (W, H))
+    hed = (255 * hed).astype("uint8")  #rescale to 0-255
+    return hed 
+
+
+pairs = get_pairs(data_path)
+for i, (visible_path, thermal_path) in enumerate(pairs[:10]):
+    print (f"Processing pair {i+1}/{len(pairs)}: {visible_path.name} and {thermal_path.name}")
+    edge_map = process_edge(thermal_path)
+    Image.fromarray(edge_map).save(f"outputs/edges_hed/edges_hed_{thermal_path.stem}.png")

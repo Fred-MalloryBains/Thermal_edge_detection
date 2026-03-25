@@ -13,6 +13,7 @@ Eg:
 ![HED edge detection example](/outputs/edges_hed/edges_hed_example.png)
 
 <br>
+
 ## Reconsturction uses controlNet
 
 ControlNet reconstruction uses a pretrained stable diffusion model and edge detection to tranlsate the image into the VL domain. The prompt has been designed using a loss model for tokenisation using the evaluation metrics discussed below.

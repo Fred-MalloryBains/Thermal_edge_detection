@@ -7,6 +7,8 @@ import torch.nn.functional as F
 from PIL import Image
 from pathlib import Path
 
+from tools.dataloader import EdgeToImageDataset
+
 ## This script learns the prompt that reduces average loss between the generated images and ground truth images.
 
 device = "mps" if torch.backends.mps.is_available() else "cpu"
@@ -20,6 +22,7 @@ try:
     )
 except Exception as error:
     print (error)
+    exit(1)
 
 pipe = StableDiffusionControlNetPipeline.from_pretrained(
     "runwayml/stable-diffusion-v1-5", 
@@ -28,8 +31,8 @@ pipe = StableDiffusionControlNetPipeline.from_pretrained(
 )
 
 
-scheduler = DDIMScheduler.from.config(pipe.scheduler.config)
-scheduler.set_timesteps(50)
+scheduler = DDIMScheduler.from_config(pipe.scheduler.config)
+scheduler.set_timesteps(20)
 
 pipe.scheduler = scheduler
 pipe = pipe.to(device)
@@ -44,7 +47,7 @@ with torch.no_grad():
         max_length=pipe.tokenizer.model_max_length,
         truncation=True,
     ).to(device)
-    seed_embeddings = pipe.text_encoder(seed_tokens).last_hidden_state
+    seed_embeddings = pipe.text_encoder(input_ids=seed_tokens.input_ids, attention_mask=seed_tokens.attention_mask).last_hidden_state
 
 v = seed_embeddings.detach().float().requires_grad_(True)
 
@@ -56,31 +59,31 @@ lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
 #@torch.no_grad()
 def encode_to_latent(im_tensor):
     z = pipe.vae.encode(im_tensor.half()).latent_dist.sample()
-    return (z * pipe.vae.config.scaling_factor).float
+    return (z * pipe.vae.config.scaling_factor).float()
 
 
-def training_step(edge_img, gt_img):
-    B = edge_img.shape[0]
+def training_step(edge_map, gt_img):
+    B = edge_map.shape[0]
     z_gt = encode_to_latent(gt_img)
 
     v_half = v.half().expand(B, -1, -1)
 
     ## sample step id
-    t_idx = torch.randint(0, 20, (B))
+    t_idx = torch.randint(0, 20, (B,), device=device)
     timesteps = scheduler.timesteps[t_idx].to(device)
 
     noise = torch.randn_like(z_gt)
     z_noisy = scheduler.add_noise(z_gt, noise, timesteps)
 
-    edge_half = edge_maps.half().to(device)
+    edge_half = edge_map.half().to(device)
 
     with torch.no_grad():
         down_block_res, mid_block_re = controlnet(
             z_noisy.half(), 
             timesteps,
             encoder_hidden_states=v_half,
-            controlnet_cond= edge_half install
-            return_dict=False,
+            controlnet_cond= edge_half,
+            return_dict=False
         )
     
     noise_pred = pipe.unet(
@@ -114,13 +117,13 @@ def train(dataloader: DataLoader, n_epochs: int = 100):
             edge_maps   = edge_maps.to(device)
             rgb_targets = rgb_targets.to(device)
 
-            optimizer.zero_grad()
+            optimiser.zero_grad()
             loss = training_step(edge_maps, rgb_targets)
             loss.backward()
 
             # Gradient clipping prevents v from jumping out of semantic space
             torch.nn.utils.clip_grad_norm_([v], max_norm=1.0)
-            optimizer.step()
+            optimiser.step()
 
             epoch_loss += loss.item()
 
@@ -132,13 +135,13 @@ def train(dataloader: DataLoader, n_epochs: int = 100):
             best_v = v.detach().clone()
             torch.save(best_v, f"best_v_epoch{epoch}.pt")
 
-        print(f"[{epoch:03d}] avg loss={avg:.5f}  lr={optimizer.param_groups[0]['lr']:.2e}")
+        print(f"[{epoch:03d}] avg loss={avg:.5f}  lr={optimiser.param_groups[0]['lr']:.2e}")
 
     return best_v
 
 dataset = EdgeToImageDataset(
-    edge_dir="data/edges",
-    image_dir="data/images"
+    data_path=Path("/home/bot/dev/Thermal_edge_detection/data/archive"),
+    image_size=512
 )
 
 dataloader = DataLoader(

@@ -21,7 +21,7 @@ def get_pairs(data_path):
         
         if thermal_path.exists():
             pairs.append((visible_path, thermal_path))
-    return pairs
+    return pairs[:10]
 
 def preprocess_image_one(image):
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
@@ -68,9 +68,6 @@ def normalize_image(image_path):
     
     normalized = cv2.normalize(img, None, 0, 255, cv2.NORM_MINMAX)
     return normalized
-
-for i in range(0,10):
-    print (f"Processing pair {i+1}/{len(pairs)}: {pairs[i][0].name} and {pairs[i][1].name}")
  
 
 

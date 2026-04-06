@@ -37,6 +37,7 @@ scheduler.set_timesteps(20)
 pipe.scheduler = scheduler
 pipe = pipe.to(device)
 pipe.vae.scaling_factor = 0.18215
+model_dtype = next(pipe.unet.parameters()).dtype
 
 
 with torch.no_grad():
@@ -58,38 +59,39 @@ lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
 
 #@torch.no_grad()
 def encode_to_latent(im_tensor):
-    z = pipe.vae.encode(im_tensor.half()).latent_dist.sample()
-    return (z * pipe.vae.config.scaling_factor).float()
+    im_tensor = im_tensor.to(device=device, dtype=model_dtype)
+    z = pipe.vae.encode(im_tensor).latent_dist.sample()
+    return (z * pipe.vae.config.scaling_factor).to(dtype=model_dtype)
 
 
 def training_step(edge_map, gt_img):
     B = edge_map.shape[0]
     z_gt = encode_to_latent(gt_img)
 
-    v_half = v.half().expand(B, -1, -1)
+    v_cond = v.to(device=device, dtype=model_dtype).expand(B, -1, -1)
 
     ## sample step id
-    t_idx = torch.randint(0, 20, (B,), device=device)
+    t_idx = torch.randint(0, len(scheduler.timesteps), (B,), device=scheduler.timesteps.device)
     timesteps = scheduler.timesteps[t_idx].to(device)
 
     noise = torch.randn_like(z_gt)
     z_noisy = scheduler.add_noise(z_gt, noise, timesteps)
 
-    edge_half = edge_map.half().to(device)
+    edge_cond = edge_map.to(device=device, dtype=model_dtype)
 
     with torch.no_grad():
         down_block_res, mid_block_re = controlnet(
-            z_noisy.half(), 
+            z_noisy, 
             timesteps,
-            encoder_hidden_states=v_half,
-            controlnet_cond= edge_half,
+            encoder_hidden_states=v_cond,
+            controlnet_cond= edge_cond,
             return_dict=False
         )
     
     noise_pred = pipe.unet(
-        z_noisy.half(),
+        z_noisy,
         timesteps,
-        encoder_hidden_states=v_half,
+        encoder_hidden_states=v_cond,
         down_block_additional_residuals=down_block_res,
         mid_block_additional_residual=mid_block_re,
     ).sample.float()
@@ -140,15 +142,15 @@ def train(dataloader: DataLoader, n_epochs: int = 100):
     return best_v
 
 dataset = EdgeToImageDataset(
-    data_path=Path("/home/bot/dev/Thermal_edge_detection/data/archive"),
+    data_path=Path("/home/bot/dev/data/archive"),
     image_size=512
 )
 
 dataloader = DataLoader(
     dataset,
-    batch_size=4,
+    batch_size=1,
     shuffle=True,
-    num_workers=2
+    num_workers=1
 )
 
 best_prompt_embedding = train(dataloader, n_epochs=100)

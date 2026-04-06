@@ -32,7 +32,7 @@ pipe = StableDiffusionControlNetPipeline.from_pretrained(
 
 
 scheduler = DDIMScheduler.from_config(pipe.scheduler.config)
-scheduler.set_timesteps(20)
+scheduler.set_timesteps(6)
 
 pipe.scheduler = scheduler
 pipe = pipe.to(device)
@@ -143,14 +143,14 @@ def train(dataloader: DataLoader, n_epochs: int = 100):
 
 dataset = EdgeToImageDataset(
     data_path=Path("/home/bot/dev/data/archive"),
-    image_size=512
+    image_size=256
 )
 
 dataloader = DataLoader(
     dataset,
     batch_size=1,
     shuffle=True,
-    num_workers=1
+    num_workers=0
 )
 
-best_prompt_embedding = train(dataloader, n_epochs=100)
+best_prompt_embedding = train(dataloader, n_epochs=5)

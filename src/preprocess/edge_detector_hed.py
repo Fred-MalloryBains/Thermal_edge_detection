@@ -21,7 +21,7 @@ def get_pairs(data_path):
         
         if thermal_path.exists():
             pairs.append((visible_path, thermal_path))
-    return pairs[:10]
+    return pairs[:32]
 
 def preprocess_image_one(image):
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)

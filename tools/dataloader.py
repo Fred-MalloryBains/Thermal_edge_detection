@@ -1,22 +1,33 @@
+from pathlib import Path
+import torch
+from torchvision import transforms
+from PIL import Image
+from src.preprocess.edge_detector_hed import get_pairs, process_edge
+
 class EdgeToImageDataset(torch.utils.data.Dataset):
-    def __init__(self, edge_dir, image_dir, image_size=512):
-        self.edge_paths = sorted(list(Path(edge_dir).glob("*")))
-        self.image_paths = sorted(list(Path(image_dir).glob("*")))
+    def __init__(self, data_path, image_size=512):
+        self.pairs = get_pairs(data_path)
 
         self.transform = transforms.Compose([
             transforms.Resize((image_size, image_size)),
             transforms.ToTensor(),
-            transforms.Normalize([0.5], [0.5])  # [-1, 1]
+            transforms.Normalize(mean=[0.5], std=[0.5])
         ])
 
     def __len__(self):
-        return len(self.edge_paths)
+        return len(self.pairs)
 
     def __getitem__(self, idx):
-        edge = Image.open(self.edge_paths[idx]).convert("RGB")
-        img  = Image.open(self.image_paths[idx]).convert("RGB")
+        visible_path, thermal_path = self.pairs[idx]
 
-        edge = self.transform(edge)
-        img  = self.transform(img)
+        img = Image.open(visible_path).convert("RGB")
 
-        return edge, img
+        edge_map = process_edge(thermal_path)
+
+        edge_map = Image.fromarray(edge_map).convert("RGB")
+
+        img = self.transform(img)
+        edge_map = self.transform(edge_map)
+
+
+        return edge_map, img

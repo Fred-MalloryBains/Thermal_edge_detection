@@ -72,7 +72,7 @@ def training_step(edge_img, gt_img):
     noise = torch.randn_like(z_gt)
     z_noisy = scheduler.add_noise(z_gt, noise, timesteps)
 
-    edge_half = edge_maps.half().cuda()
+    edge_half = edge_maps.half().to(device)
 
     with torch.no_grad():
         down_block_res, mid_block_re = controlnet(
@@ -98,7 +98,7 @@ def training_step(edge_img, gt_img):
     )
 
     L_latent = F.mse_loss(z_pred, z_gt)
-    L_reg = 0.01 * F.mse_loss(v, seed_emb.float().detach())
+    L_reg = 0.01 * F.mse_loss(v, seed_embeddings.float().detach())
     loss = L_latent + L_reg
 
     return loss
@@ -111,8 +111,8 @@ def train(dataloader: DataLoader, n_epochs: int = 100):
         epoch_loss = 0.0
 
         for edge_maps, rgb_targets in dataloader:
-            edge_maps   = edge_maps.cuda()
-            rgb_targets = rgb_targets.cuda()
+            edge_maps   = edge_maps.to(device)
+            rgb_targets = rgb_targets.to(device)
 
             optimizer.zero_grad()
             loss = training_step(edge_maps, rgb_targets)

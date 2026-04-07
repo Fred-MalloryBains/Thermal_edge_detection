@@ -3,64 +3,73 @@ from diffusers import (
     ControlNetModel,
     UniPCMultistepScheduler
 )
-import numpy as np
 import torch
-from pathlib import Path 
-import numpy as np 
 from diffusers.utils import load_image
 
-
 device = "mps" if torch.backends.mps.is_available() else "cpu"
-dtype = torch.float16 if device == "mps" else torch.float32
+# Match training dtype exactly
+dtype = torch.float32
 
-# Control Net model
-try:
-    controlnet = ControlNetModel.from_pretrained(
-        "lllyasviel/sd-controlnet-hed", 
-        torch_dtype=dtype
-    )
-except Exception as error:
-    print (error)
-
-print ('load controlnet')
-
-# --------- LOAD MAIN PIPELINE ----------
-pipe = StableDiffusionControlNetPipeline.from_pretrained(
-    "runwayml/stable-diffusion-v1-5", 
-    controlnet=controlnet, 
+controlnet = ControlNetModel.from_pretrained(
+    "lllyasviel/sd-controlnet-hed",
     torch_dtype=dtype
 )
 
+pipe = StableDiffusionControlNetPipeline.from_pretrained(
+    "runwayml/stable-diffusion-v1-5",
+    controlnet=controlnet,
+    torch_dtype=dtype
+)
 pipe.scheduler = UniPCMultistepScheduler.from_config(pipe.scheduler.config)
 pipe = pipe.to(device)
 
+# ---- Reconstruct seed_emb exactly as in training ----
+SEED_PROMPT = "photorealistic urban scene"  # must match training
 
+tokeniser = pipe.tokenizer
+text_encoder = pipe.text_encoder
 
-prompt = """
-photorealistic, realistic colours, high resolution, 8k, structured
-"""
+with torch.no_grad():
+    tokens = tokeniser(
+        SEED_PROMPT,
+        return_tensors="pt",
+        padding="max_length",
+        max_length=tokeniser.model_max_length,
+        truncation=True
+    ).to(device)
+    seed_emb = text_encoder(**tokens).last_hidden_state  # [1, 77, 768]
 
-negative_prompt = """
-blurry, low quality, deformed, cartoon, painting, illustration,
-oversaturated, monochrome, distorted geometry
-"""
+# ---- Load and apply delta ----
+delta = torch.load("best_delta.pt", map_location=device)  # [1, 77, 768]
+print(f"delta shape: {delta.shape}, seed_emb shape: {seed_emb.shape}")
+assert delta.shape == seed_emb.shape, "Shape mismatch — check how delta was saved"
 
+prompt_embeds = (seed_emb + delta).to(dtype)  # [1, 77, 768]
 
-    # Process both thermal and visible
+# ---- Null embedding for CFG negative ----
+with torch.no_grad():
+    null_tokens = tokeniser(
+        "",
+        return_tensors="pt",
+        padding="max_length",
+        max_length=tokeniser.model_max_length,
+        truncation=True
+    ).to(device)
+    negative_prompt_embeds = text_encoder(**null_tokens).last_hidden_state.to(dtype)
 
-edge_path = f"outputs/edges_hed/edges_hed_thermal_three.png"
-
-# FIX: Re-assign the resized image
+# ---- Load edge image ----
+edge_path = "outputs/edges_hed/edges_hed_I00451.png"
 edge_img = load_image(edge_path).resize((512, 512))
 
-# Run inference
+# ---- Run pipeline ----
 output = pipe(
-    prompt=prompt,
-    negative_prompt=negative_prompt,
+    prompt_embeds=prompt_embeds,
+    negative_prompt_embeds=torch.zeros_like(prompt_embeds),
     image=edge_img,
-    num_inference_steps=34, # UniPC is fast; 20-25 steps is usually enough
+    num_inference_steps=34,
     controlnet_conditioning_scale=1.0,
-    guidance_scale=9
+    guidance_scale=9.0
 ).images[0]
 
-output.save(f"outputs/hed_result_thermal_three.png")
+output.save("outputs/delta_result.png")
+print("Saved to outputs/delta_result.png")

@@ -74,28 +74,35 @@ def normalize_image(image_path):
 
 
 def process_edge(img_path):
-# load the input image and grab its dimensions, for future use while defining the blob
-    img = cv2.imread(str(img_path), cv2.IMREAD_GRAYSCALE)  #Using the first thermal image as an example
+    img = cv2.imread(str(img_path), cv2.IMREAD_GRAYSCALE)
     (H, W) = img.shape[:2]
 
-    img = preprocess_image_two(img)
+    img = preprocess_image_two(img)  # returns [low, mid, high] as uint8
 
+    # HED pretrained BSDS expects ImageNet BGR means, not local image means
+    blob = cv2.dnn.blobFromImage(
+        img,
+        scalefactor=0.7,
+        size=(500, 500),
+        mean=(104.00698793, 116.66876762, 122.67891434),
+        swapRB=False,
+        crop=False
+    )
 
-    mean_pixel_values= np.average(img, axis = (0,1))
-    blob = cv2.dnn.blobFromImage(img, scalefactor=0.5, size=(W, H),
-                                mean=(mean_pixel_values[0], mean_pixel_values[1], mean_pixel_values[2]),
-                                swapRB= True, crop=True)
-
-    blob_for_plot = np.moveaxis(blob[0,:,:,:], 0,2)
+    # For plotting, clip to valid uint8 range after shifting means back
+    blob_for_plot = np.moveaxis(blob[0], 0, 2)
+    blob_for_plot = np.clip(blob_for_plot + 104, 0, 255).astype(np.uint8)
     plt.imshow(blob_for_plot)
-    # set the blob as the input to the network and perform a forward pass
-    # to compute the edges
+
     net.setInput(blob)
     hed = net.forward()
-    hed = hed[0,0,:,:]  #Drop the other axes 
-    #hed = cv2.resize(hed[0, 0], (W, H))
-    hed = (255 * hed).astype("uint8")  #rescale to 0-255
-    return hed 
+    hed = hed[0, 0, :, :]
+    hed = (255 * hed).astype("uint8")
+    
+    margin = 40
+    hed = hed[margin:H-margin, margin:W-margin]
+    hed = cv2.resize(hed, (W, H))
+    return hed
 
 def run():
     pairs = get_pairs(data_path)
@@ -111,3 +118,6 @@ protoPath = "src/preprocess/hed_model/deploy.prototxt"
 modelPath = "src/preprocess/hed_model/hed_pretrained_bsds.caffemodel"
 
 net = cv2.dnn.readNetFromCaffe(protoPath, modelPath)
+
+if __name__ == "__main__":
+    run()

@@ -8,7 +8,6 @@ from PIL import Image
 import matplotlib.pyplot as plt
 
 
-data_path = Path("/Volumes/Samsung_1TB/thermal_images/archive/").expanduser()
 
 ## resolution of the thermal images?
 ## prompt vague and specific - middle ground
@@ -72,10 +71,7 @@ def normalize_image(image_path):
 
 
 
-protoPath = "src/preprocess/hed_model/deploy.prototxt"
-modelPath = "src/preprocess/hed_model/hed_pretrained_bsds.caffemodel"
 
-net = cv2.dnn.readNetFromCaffe(protoPath, modelPath)
 
 def process_edge(img_path):
 # load the input image and grab its dimensions, for future use while defining the blob
@@ -101,9 +97,17 @@ def process_edge(img_path):
     hed = (255 * hed).astype("uint8")  #rescale to 0-255
     return hed 
 
+def run():
+    pairs = get_pairs(data_path)
+    for i, (visible_path, thermal_path) in enumerate(pairs[:10]):
+        print (f"Processing pair {i+1}/{len(pairs)}: {visible_path.name} and {thermal_path.name}")
+        edge_map = process_edge(thermal_path)
+        Image.fromarray(edge_map).save(f"outputs/edges_hed/edges_hed_{thermal_path.stem}.png")
 
-pairs = get_pairs(data_path)
-for i, (visible_path, thermal_path) in enumerate(pairs[:10]):
-    print (f"Processing pair {i+1}/{len(pairs)}: {visible_path.name} and {thermal_path.name}")
-    edge_map = process_edge(thermal_path)
-    Image.fromarray(edge_map).save(f"outputs/edges_hed/edges_hed_{thermal_path.stem}.png")
+
+
+data_path = Path("/Volumes/Samsung_1TB/thermal_images/archive/").expanduser() 
+protoPath = "src/preprocess/hed_model/deploy.prototxt"
+modelPath = "src/preprocess/hed_model/hed_pretrained_bsds.caffemodel"
+
+net = cv2.dnn.readNetFromCaffe(protoPath, modelPath)

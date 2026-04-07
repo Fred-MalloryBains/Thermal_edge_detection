@@ -12,7 +12,7 @@ from tools.dataloader import EdgeToImageDataset
 ## This script learns the prompt that reduces average loss between the generated images and ground truth images.
 
 device = "mps" if torch.backends.mps.is_available() else "cpu"
-dtype = torch.float16 if device == "mps" else torch.float32
+dtype = torch.float32
 
 # Control Net model
 try:
@@ -50,7 +50,7 @@ with torch.no_grad():
     ).to(device)
     seed_embeddings = pipe.text_encoder(input_ids=seed_tokens.input_ids, attention_mask=seed_tokens.attention_mask).last_hidden_state
 
-v = seed_embeddings.detach().float().requires_grad_(True)
+v = seed_embeddings.detach().clone().to(device=device, dtype=model_dtype).requires_grad_(True)
 
 optimiser = torch.optim.Adam([v], lr=1e-3, weight_decay=1e-5)
 lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
@@ -60,53 +60,60 @@ lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
 #@torch.no_grad()
 def encode_to_latent(im_tensor):
     im_tensor = im_tensor.to(device=device, dtype=model_dtype)
-    z = pipe.vae.encode(im_tensor).latent_dist.sample()
-    return (z * pipe.vae.config.scaling_factor).to(dtype=model_dtype)
-
+    z = pipe.vae.encode(im_tensor).latent_dist.sample().to(model_dtype)
+    
+    scaling = torch.tensor(
+        pipe.vae.config.scaling_factor,
+        device=device,
+        dtype=model_dtype
+    )
+    
+    return z * scaling
 
 def training_step(edge_map, gt_img):
-    B = edge_map.shape[0]
+    B = edge_map.shape[0]  # batch size
     z_gt = encode_to_latent(gt_img)
 
-    v_cond = v.to(device=device, dtype=model_dtype).expand(B, -1, -1)
+    # Repeat the learned prompt embedding
+    v_cond = v.repeat(B, 1, 1).to(device=device, dtype=model_dtype)
 
-    ## sample step id
-    t_idx = torch.randint(0, len(scheduler.timesteps), (B,), device=scheduler.timesteps.device)
-    timesteps = scheduler.timesteps[t_idx].to(device)
+    # --- TIMESTEPS (long for indexing) ---
+    t_idx = torch.randint(0, len(scheduler.timesteps), (B,), device="cpu")  # CPU long indices
+    timesteps = scheduler.timesteps[t_idx].to(device=device)  # keep long for scheduler
+    timesteps_float = timesteps.to(dtype=torch.float32)       # float32 for MPS arithmetic
 
-    noise = torch.randn_like(z_gt)
-    z_noisy = scheduler.add_noise(z_gt, noise, timesteps)
+    # --- NOISE ---
+    noise = torch.randn_like(z_gt, dtype=torch.float32)
 
-    edge_cond = edge_map.to(device=device, dtype=model_dtype)
+    # Add noise to latent
+    z_noisy = scheduler.add_noise(z_gt, noise, timesteps)  # timesteps must be long
+    z_noisy = z_noisy.to(dtype=model_dtype)  # UNet expects model_dtype
 
+    # ControlNet forward (no grad for memory)
     with torch.no_grad():
-        down_block_res, mid_block_re = controlnet(
-            z_noisy, 
-            timesteps,
+        down_block_res, mid_block_res = controlnet(
+            z_noisy,
+            timesteps_float,  # use float for MPS ops
             encoder_hidden_states=v_cond,
-            controlnet_cond= edge_cond,
+            controlnet_cond=edge_map.to(dtype=model_dtype),
             return_dict=False
         )
-    
+
+    # UNet prediction
     noise_pred = pipe.unet(
         z_noisy,
-        timesteps,
+        timesteps_float,  # float for MPS
         encoder_hidden_states=v_cond,
         down_block_additional_residuals=down_block_res,
-        mid_block_additional_residual=mid_block_re,
-    ).sample.float()
+        mid_block_additional_residual=mid_block_res,
+    ).sample
 
-    z_pred = torch.stack([
-        scheduler.step(noise_pred[i], timesteps[i], z_noisy[i]).prev_sample
-        for i in range(B)
-    ]
-    )
+    # Compute loss
+    L_latent = F.mse_loss(noise_pred.float(), noise.float())
+    target_seed = seed_embeddings.detach().to(device=v.device, dtype=v.dtype)
+    L_reg = 0.01 * F.mse_loss(v, target_seed)
 
-    L_latent = F.mse_loss(z_pred, z_gt)
-    L_reg = 0.01 * F.mse_loss(v, seed_embeddings.float().detach())
-    loss = L_latent + L_reg
-
-    return loss
+    return L_latent + L_reg
 
 def train(dataloader: DataLoader, n_epochs: int = 100):
     best_loss = float("inf")
@@ -142,8 +149,8 @@ def train(dataloader: DataLoader, n_epochs: int = 100):
     return best_v
 
 dataset = EdgeToImageDataset(
-    data_path=Path("/home/bot/dev/data/archive"),
-    image_size=256
+    data_path=Path("/Volumes/Samsung_1TB/thermal_images/archive"),
+    image_size=128
 )
 
 dataloader = DataLoader(

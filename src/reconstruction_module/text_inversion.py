@@ -43,7 +43,7 @@ tokeniser = pipe.tokenizer
 ## seed embeddings
 with torch.no_grad():
     tokens = tokeniser(
-        "photorealistic urban scene",
+        "colorful photorealistic urban scene",
         return_tensors="pt",
         padding="max_length",
         max_length=tokeniser.model_max_length,
@@ -57,7 +57,7 @@ with torch.no_grad():
 delta = torch.zeros_like(seed_emb, requires_grad=True)
 
 ## https://github.com/rinongal/textual_inversion/blob/main/ldm/models/diffusion/ddpm.py#L1443
-optimizer = torch.optim.Adam([delta], lr=1e-3)
+optimizer = torch.optim.Adam([delta], lr=1e-4)
 
 def training_step(edge_map, x0):
 
@@ -157,14 +157,14 @@ def train(dataloader, n_epochs=10):
             
 dataset = EdgeToImageDataset(
     data_path=Path("/Volumes/Samsung_1TB/thermal_images/archive"),
-    image_size=128
+    image_size=256
 )
 
 dataloader = DataLoader(
     dataset,
-    batch_size=1,
+    batch_size=4,
     shuffle=True,
     num_workers=0
 )
 
-best_prompt_embedding = train(dataloader, n_epochs=5)
+best_prompt_embedding = train(dataloader, n_epochs=10)

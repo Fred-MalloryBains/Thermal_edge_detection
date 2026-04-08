@@ -24,7 +24,7 @@ pipe.scheduler = UniPCMultistepScheduler.from_config(pipe.scheduler.config)
 pipe = pipe.to(device)
 
 # ---- Reconstruct seed_emb exactly as in training ----
-SEED_PROMPT = "photorealistic urban scene"  # must match training
+SEED_PROMPT = "colorful photorealistic urban scene"  # must match training
 
 tokeniser = pipe.tokenizer
 text_encoder = pipe.text_encoder
@@ -71,5 +71,5 @@ output = pipe(
     guidance_scale=9.0
 ).images[0]
 
-output.save("outputs/delta_result.png")
+output.save("outputs/delta_result_2.png")
 print("Saved to outputs/delta_result.png")

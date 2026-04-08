@@ -111,7 +111,7 @@ def training_step(edge_map, gt_img):
     # Compute loss
     L_latent = F.mse_loss(noise_pred.float(), noise.float())
     target_seed = seed_embeddings.detach().to(device=v.device, dtype=v.dtype)
-    L_reg = 0.01 * F.mse_loss(v, target_seed)
+    L_reg = 0.01 * F.mse_loss(v[0], target_seed[0])
 
     return L_latent + L_reg
 
@@ -155,9 +155,9 @@ dataset = EdgeToImageDataset(
 
 dataloader = DataLoader(
     dataset,
-    batch_size=1,
+    batch_size=4,
     shuffle=True,
     num_workers=0
 )
 
-best_prompt_embedding = train(dataloader, n_epochs=5)
+best_prompt_embedding = train(dataloader, n_epochs=100)

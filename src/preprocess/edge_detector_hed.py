@@ -67,8 +67,6 @@ def normalize_image(image_path):
     
     normalized = cv2.normalize(img, None, 0, 255, cv2.NORM_MINMAX)
     return normalized
- 
-
 
 
 

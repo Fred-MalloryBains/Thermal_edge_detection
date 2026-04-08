@@ -26,7 +26,7 @@ class EdgeToImageDataset(torch.utils.data.Dataset):
     def __getitem__(self, idx):
         visible_path, thermal_path = self.pairs[idx]
 
-        img = Image.open(visible_path).convert("RGB")
+        img = Image.open(thermal_path).convert("RGB")
 
         edge_map = process_edge(visible_path)
 

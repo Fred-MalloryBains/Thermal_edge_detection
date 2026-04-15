@@ -22,6 +22,8 @@ args_strModel = 'bsds500' # only 'bsds500' for now
 args_strIn = './images/sample.png'
 args_strOut = './out.png'
 
+device = "mps" if torch.backends.mps.is_available() else "cpu"
+
 for strOption, strArg in getopt.getopt(sys.argv[1:], '', [
     'model=',
     'in=',
@@ -91,7 +93,7 @@ class Network(torch.nn.Module):
 
         self.netCombine = torch.nn.Sequential(
             torch.nn.Conv2d(in_channels=5, out_channels=1, kernel_size=1, stride=1, padding=0),
-            torch.nn.Sigmoid()
+            #torch.nn.Sigmoid()
         )
 
         self.load_state_dict({ strKey.replace('module', 'net'): tenWeight for strKey, tenWeight in torch.hub.load_state_dict_from_url(url='http://content.sniklaus.com/github/pytorch-hed/network-' + args_strModel + '.pytorch', file_name='hed-' + args_strModel).items() })
@@ -118,8 +120,15 @@ class Network(torch.nn.Module):
         tenScoreThr = torch.nn.functional.interpolate(input=tenScoreThr, size=(tenInput.shape[2], tenInput.shape[3]), mode='bilinear', align_corners=False)
         tenScoreFou = torch.nn.functional.interpolate(input=tenScoreFou, size=(tenInput.shape[2], tenInput.shape[3]), mode='bilinear', align_corners=False)
         tenScoreFiv = torch.nn.functional.interpolate(input=tenScoreFiv, size=(tenInput.shape[2], tenInput.shape[3]), mode='bilinear', align_corners=False)
-
-        return self.netCombine(torch.cat([ tenScoreOne, tenScoreTwo, tenScoreThr, tenScoreFou, tenScoreFiv ], 1))
+        tenCombine = self.netCombine(torch.cat([ tenScoreOne, tenScoreTwo, tenScoreThr, tenScoreFou, tenScoreFiv ], 1))
+        return (
+            tenScoreOne,
+            tenScoreTwo,
+            tenScoreThr,
+            tenScoreFou,
+            tenScoreFiv,
+            tenCombine
+        )
     # end
 # end
 
@@ -131,16 +140,16 @@ def estimate(tenInput):
     global netNetwork
 
     if netNetwork is None:
-        netNetwork = Network().cuda().train(False)
+        netNetwork = Network().to(device).train(False)
     # end
 
     intWidth = tenInput.shape[2]
     intHeight = tenInput.shape[1]
 
-    assert(intWidth == 480) # remember that there is no guarantee for correctness, comment this line out if you acknowledge this and want to continue
-    assert(intHeight == 320) # remember that there is no guarantee for correctness, comment this line out if you acknowledge this and want to continue
+    #assert(intWidth == 480) # remember that there is no guarantee for correctness, comment this line out if you acknowledge this and want to continue
+    #assert(intHeight == 320) # remember that there is no guarantee for correctness, comment this line out if you acknowledge this and want to continue
 
-    return netNetwork(tenInput.cuda().view(1, 3, intHeight, intWidth))[0, :, :, :].cpu()
+    return netNetwork(tenInput.to(device).view(1, 3, intHeight, intWidth))[0, :, :, :].cpu()
 # end
 
 ##########################################################

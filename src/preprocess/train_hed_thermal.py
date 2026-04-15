@@ -37,29 +37,47 @@ val_dl   = DataLoader(val_ds,   batch_size=4, shuffle=False, num_workers=0)
 optimiser = torch.optim.Adam(model.parameters(), lr=1e-3)
 scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimiser, T_max=20, eta_min=1e-5)
 
-def hed_loss(fused, gt):
+def hed_loss(logits, gt):
     """
-    Deep supervision: the fused output AND the 5 side outputs all
-    get supervised. The side outputs are accessible via a modified forward.
-    BCE suits sparse binary edge maps well.
+    Weighted Binary Cross Entropy using Logits for stability.
+    Positives are weighted by (1 - beta), Negatives by beta.
     """
-    return F.binary_cross_entropy(fused, gt)
+    mask = gt > 0.5
+    pos_num = torch.sum(mask)
+    neg_num = torch.sum(~mask)
+    total_num = pos_num + neg_num
+
+    # beta is the fraction of positive pixels (edges)
+    # In HED, we weight negative pixels by beta and positive pixels by (1 - beta)
+    beta = pos_num / total_num
+    
+    # Weight for edge pixels (positives) should be high
+    # Weight for background pixels (negatives) should be low
+    pos_weight = (1.0 - beta)
+    neg_weight = beta
+
+    # Stable BCE with Logits: 
+    # loss = - [w_p * y * log(sigmoid(x)) + w_n * (1-y) * log(1-sigmoid(x))]
+    loss = -(pos_weight * gt * F.logsigmoid(logits) + 
+             neg_weight * (1 - gt) * F.logsigmoid(-logits))
+    
+    return loss.mean()
 
 def run_epoch(loader, train=True):
     model.train(train)
     total = 0.0
     with torch.set_grad_enabled(train):
-        for thermal, gt_edge in loader:
-            # thermal: [B,3,H,W] pseudo-RGB, gt_edge: [B,1,H,W] in [0,1]
-            thermal  = thermal.to(device, dtype=torch.float32)
-            gt_edge  = gt_edge.to(device, dtype=torch.float32)
-            
+        for batch in loader:
+            thermal = batch['thermal_raw'].to(device, dtype=torch.float32)
+            gt_edge = batch['edge_raw'].to(device, dtype=torch.float32)
+
             gt_edge = gt_edge[:,0:1,:,:]  # ensure gt_edge has shape [B,1,H,W]
 
-            pred = model(thermal)  # [B,1,H,W] sigmoid output
+            outputs = model(thermal)  # [B,1,H,W] sigmoid output
 
-            
-            loss = hed_loss(pred, gt_edge)
+            loss = 0 
+            for pred in outputs:
+                loss += hed_loss(pred, gt_edge)
 
             if train:
                 optimiser.zero_grad()
@@ -71,7 +89,7 @@ def run_epoch(loader, train=True):
     return total / len(loader)
 
 best_val = float("inf")
-for epoch in range(20):
+for epoch in range(32):
     train_loss = run_epoch(train_dl, train=True)
     val_loss   = run_epoch(val_dl,   train=False)
     scheduler.step()

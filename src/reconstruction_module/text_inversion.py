@@ -123,7 +123,7 @@ def training_step(edge_map, x0):
 
     return L_recon + 0.1 * L_noise + 0.1 * L_reg
 
-def train(dataloader, n_epochs=10):
+def train(dataloader, n_epochs=100):
 
     best_loss = float("inf")
 

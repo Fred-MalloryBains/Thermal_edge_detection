@@ -39,6 +39,7 @@ with torch.no_grad():
     ).to(device)
     seed_emb = text_encoder(**tokens).last_hidden_state  # [1, 77, 768]
 
+
 # ---- Load and apply delta ----
 delta = torch.load("best_delta.pt", map_location=device)  # [1, 77, 768]
 print(f"delta shape: {delta.shape}, seed_emb shape: {seed_emb.shape}")
@@ -46,6 +47,10 @@ assert delta.shape == seed_emb.shape, "Shape mismatch — check how delta was sa
 
 prompt_embeds = (seed_emb + delta).to(dtype)  # [1, 77, 768]
 
+"""
+pipe.load_textual_inversion("best_delta.pt", token="S*")
+prompt_embeds = SEED_PROMPT + " S*"  
+"""
 # ---- Null embedding for CFG negative ----
 with torch.no_grad():
     null_tokens = tokeniser(
@@ -58,18 +63,18 @@ with torch.no_grad():
     negative_prompt_embeds = text_encoder(**null_tokens).last_hidden_state.to(dtype)
 
 # ---- Load edge image ----
-edge_path = "outputs/edges_hed/edges_hed_I00451.png"
+edge_path = "outputs/edges_hed_custom/edges_hedI00323.png"
 edge_img = load_image(edge_path).resize((512, 512))
 
 # ---- Run pipeline ----
 output = pipe(
     prompt_embeds=prompt_embeds,
-    negative_prompt_embeds=torch.zeros_like(prompt_embeds),
+    negative_prompt_embeds=negative_prompt_embeds,
     image=edge_img,
-    num_inference_steps=34,
+    num_inference_steps=24,
     controlnet_conditioning_scale=1.0,
-    guidance_scale=9.0
+    guidance_scale=6.0
 ).images[0]
 
-output.save("outputs/delta_result_2.png")
-print("Saved to outputs/delta_result.png")
+output.save("outputs/delta_result_4.png")
+print("Saved to outputs/delta_result_4.png")

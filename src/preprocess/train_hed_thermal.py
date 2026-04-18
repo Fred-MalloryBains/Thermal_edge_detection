@@ -15,10 +15,11 @@ model = Network().to(device)
 model.train()
 
 for name, param in model.named_parameters():
-    is_backbone = any(name.startswith(b) for b in [
-        'netVggOne', 'netVggTwo', 'netVggThr', 'netVggFou', 'netVggFiv'
+    # Unfreeze the Score layers, the Combine layer, AND the first VGG block
+    is_trainable = any(name.startswith(b) for b in [
+        'netScore', 'netCombine', 'netVggOne' 
     ])
-    param.requires_grad_(not is_backbone)
+    param.requires_grad_(is_trainable)
 
 trainable = [p for p in model.parameters() if p.requires_grad]
 print(f"Trainable params: {sum(p.numel() for p in trainable):,}")  # 6K
@@ -34,38 +35,44 @@ train_ds, val_ds = random_split(dataset, [len(dataset) - n_val, n_val])
 train_dl = DataLoader(train_ds, batch_size=4, shuffle=True, num_workers=0)
 val_dl   = DataLoader(val_ds,   batch_size=4, shuffle=False, num_workers=0)
 
-optimiser = torch.optim.Adam(model.parameters(), lr=1e-3)
+optimiser = torch.optim.Adam(trainable, lr=5e-5)
 scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimiser, T_max=20, eta_min=1e-5)
 
+def save_debug_images(thermal, gt_edge, outputs, epoch):
+    
+    for i in range(min(2, thermal.size(0))):  # Save up to 2 samples per epoch
+        # Save Ground Truth
+        gt_np = (gt_edge[i, 0].cpu().numpy() * 255).astype(np.uint8)
+        Image.fromarray(gt_np).save(f"debug/ep{epoch}_samp{i}_gt.png")
+        
+        # Save Side Outputs and Fused
+        for j, pred in enumerate(outputs):
+            # Apply sigmoid because we are training with logits
+            p_map = torch.sigmoid(pred[i, 0]).cpu().detach().numpy()
+            p_img = (p_map * 255).astype(np.uint8)
+            
+            label = f"side{j+1}" if j < 5 else "fused"
+            Image.fromarray(p_img).save(f"debug/ep{epoch}_samp{i}_{label}.png")
+
 def hed_loss(logits, gt):
-    """
-    Weighted Binary Cross Entropy using Logits for stability.
-    Positives are weighted by (1 - beta), Negatives by beta.
-    """
-    mask = gt > 0.5
-    pos_num = torch.sum(mask)
-    neg_num = torch.sum(~mask)
-    total_num = pos_num + neg_num
+    gt_hard = (gt > 0.5).float()  # Binarize ground truth for loss calculation
+    mask = gt_hard.bool()
+    pos_num = mask.float().sum()
+    neg_num = (~mask).float().sum()
+    total   = pos_num + neg_num
 
-    # beta is the fraction of positive pixels (edges)
-    # In HED, we weight negative pixels by beta and positive pixels by (1 - beta)
-    beta = pos_num / total_num
-    
-    # Weight for edge pixels (positives) should be high
-    # Weight for background pixels (negatives) should be low
-    pos_weight = (1.0 - beta)
-    neg_weight = beta
+    # Natural class-balanced weights — don't modify these
+    alpha = neg_num / total   # weight for positives (edges)
+    beta  = 3 *  (pos_num / total)   # weight for negatives (background)
 
-    # Stable BCE with Logits: 
-    # loss = - [w_p * y * log(sigmoid(x)) + w_n * (1-y) * log(1-sigmoid(x))]
-    loss = -(pos_weight * gt * F.logsigmoid(logits) + 
-             neg_weight * (1 - gt) * F.logsigmoid(-logits))
-    
+    loss = -(alpha * gt_hard * F.logsigmoid(logits) +
+             beta  * (1 - gt_hard) * F.logsigmoid(-logits))
     return loss.mean()
 
 def run_epoch(loader, train=True):
     model.train(train)
     total = 0.0
+    has_saved = False
     with torch.set_grad_enabled(train):
         for batch in loader:
             thermal = batch['thermal_raw'].to(device, dtype=torch.float32)
@@ -76,8 +83,13 @@ def run_epoch(loader, train=True):
             outputs = model(thermal)  # [B,1,H,W] sigmoid output
 
             loss = 0 
-            for pred in outputs:
-                loss += hed_loss(pred, gt_edge)
+            weights = [0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 1]
+            for i, pred in enumerate(outputs):
+                loss += weights[i] * hed_loss(pred, gt_edge)
+            
+            if not has_saved and not train:
+                save_debug_images(thermal, gt_edge, outputs, epoch)
+                has_saved = True
 
             if train:
                 optimiser.zero_grad()
@@ -89,7 +101,7 @@ def run_epoch(loader, train=True):
     return total / len(loader)
 
 best_val = float("inf")
-for epoch in range(32):
+for epoch in range(20):
     train_loss = run_epoch(train_dl, train=True)
     val_loss   = run_epoch(val_dl,   train=False)
     scheduler.step()

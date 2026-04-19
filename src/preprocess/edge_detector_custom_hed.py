@@ -79,8 +79,8 @@ def process_edge_pytorch(img_path):
     with torch.no_grad():
         outputs = pytorch_net(tensor_img)
         
-        # If your Network() returns all 6 outputs (5 side + 1 fused), grab the last one.
-        # If it only returns 1 fused output, just grab it directly.
+        
+
         fused = outputs[-1] if isinstance(outputs, tuple) else outputs
         fused = torch.sigmoid(fused)  # Ensure output is in [0, 1] range
         #fused = fused > 0.5

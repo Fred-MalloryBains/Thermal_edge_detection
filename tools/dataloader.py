@@ -19,8 +19,9 @@ net = cv2.dnn.readNetFromCaffe(protoPath, modelPath)
 
 class EdgeToImageDataset(torch.utils.data.Dataset):
     def __init__(self, data_path, image_size=512):
+        
         self.pairs = self.get_pairs(data_path)
-
+        
         self.sd_transform = transforms.Compose([
             transforms.Resize((image_size, image_size)),
             transforms.ToTensor(),
@@ -44,7 +45,7 @@ class EdgeToImageDataset(torch.utils.data.Dataset):
         img = self.crop_and_resize(img)
         img = Image.fromarray(img, mode="RGB") # Convert to PIL Image in grayscale
 
-        edge_map_three = self.process_edge(visible_path)
+        edge_map_three = self.process_edge_soft(visible_path)
 
         edge_map_one = Image.fromarray(edge_map_three).convert("L")  # Convert to PIL Image in grayscale
 
@@ -64,7 +65,7 @@ class EdgeToImageDataset(torch.utils.data.Dataset):
             
             if thermal_path.exists():
                 pairs.append((visible_path, thermal_path))
-        return pairs[:100]
+        return pairs
     
     def process_image(self, img):
         denoised = cv2.bilateralFilter(img, 9, 75, 75)
@@ -111,3 +112,16 @@ class EdgeToImageDataset(torch.utils.data.Dataset):
         hed = self.crop_and_resize(hed)
 
         return hed
+    
+    def process_edge_soft (self, img_path):
+        edge = self.process_edge(img_path)
+        
+        edge = edge.astype(np.float32) / 255.0
+        
+        kernel = np.ones((10,10), np.uint8)
+        edge = cv2.dilate(edge, kernel, iterations=1)
+        
+        edge = cv2.GaussianBlur(edge, (9,9), 0)
+        
+        edge = (edge * 255).astype(np.uint8)
+        return edge

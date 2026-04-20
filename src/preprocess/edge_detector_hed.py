@@ -53,11 +53,11 @@ def preprocess_image_two(thermal_img):
     clahe_mid = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8)).apply(denoised)
     
     # Channel 3: High contrast (mimics strong edges/shadows in RGB)
-    # This helps the model interpret contents even with ambiguous shapes[cite: 174].
+    # This helps the model interpret contents even with ambiguous shapes.
     clahe_high = cv2.createCLAHE(clipLimit=4.0, tileGridSize=(8,8)).apply(denoised)
     
     # 3. Semantic Channel Stacking
-    # HED expects a 3-channel input to engage its deep encoding layers[cite: 81, 88].
+    # HED expects a 3-channel input to engage its deep encoding layers.
     pseudo_rgb = cv2.merge([clahe_low, clahe_mid, clahe_high])
     
     return pseudo_rgb
@@ -72,10 +72,10 @@ def normalize_image(image_path):
 
 
 def process_edge(img_path):
-    img = cv2.imread(str(img_path), cv2.IMREAD_GRAYSCALE)
+    img = cv2.imread(str(img_path))
     (H, W) = img.shape[:2]
 
-    img = preprocess_image_two(img)  # returns [low, mid, high] as uint8
+    #img = preprocess_image_two(img)  # returns [low, mid, high] as uint8
 
     # HED pretrained BSDS expects ImageNet BGR means, not local image means
     blob = cv2.dnn.blobFromImage(
@@ -86,11 +86,6 @@ def process_edge(img_path):
         swapRB=False,
         crop=False
     )
-
-    # For plotting, clip to valid uint8 range after shifting means back
-    blob_for_plot = np.moveaxis(blob[0], 0, 2)
-    blob_for_plot = np.clip(blob_for_plot + 104, 0, 255).astype(np.uint8)
-    plt.imshow(blob_for_plot)
 
     net.setInput(blob)
     hed = net.forward()

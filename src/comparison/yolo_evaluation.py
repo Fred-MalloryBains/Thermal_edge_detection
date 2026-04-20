@@ -46,14 +46,26 @@ def extract_detections(results, model):
     print ("average confidence: ", average_confidence)
     return detections
 
-visible_files = get_image_files(visible_paths)
-thermal_files = get_image_files(thermal_paths)
 
-results = model(visible_files[0])
-detections = extract_detections(results, model)
+def all_file_comparison():
+    visible_files = get_image_files(visible_paths)
+    thermal_files = get_image_files(thermal_paths)
 
-print(detections)
+    results = model(visible_files[0])
+    detections = extract_detections(results, model)
 
-results = model(thermal_files[0])
-detections = extract_detections(results, model)
-print(detections)
+    print(detections)
+
+    results = model(thermal_files[0])
+    detections = extract_detections(results, model)
+    print(detections)
+
+
+def yolo_compare(image_one, image_two):
+    model = YOLO("yolov8m.pt")
+    results = model(image_one)
+    detections_one = extract_detections(results, model)
+    results = model (image_two)
+    detections_two = extract_detections(results, model)
+    return detections_one, detections_two
+        

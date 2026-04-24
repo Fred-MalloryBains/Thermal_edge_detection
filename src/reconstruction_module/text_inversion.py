@@ -43,7 +43,7 @@ tokeniser = pipe.tokenizer
 ## seed embeddings
 with torch.no_grad():
     tokens = tokeniser(
-        "colorful photorealistic urban scene",
+        "photorealistic urban scene",
         return_tensors="pt",
         padding="max_length",
         max_length=tokeniser.model_max_length,
@@ -57,7 +57,7 @@ with torch.no_grad():
 delta = torch.zeros_like(seed_emb, requires_grad=True)
 
 ## https://github.com/rinongal/textual_inversion/blob/main/ldm/models/diffusion/ddpm.py#L1443
-optimizer = torch.optim.Adam([delta], lr=1e-4)
+optimizer = torch.optim.Adam([delta], lr=1e-3)
 
 def training_step(edge_map, x0):
 
@@ -123,17 +123,17 @@ def training_step(edge_map, x0):
 
     return L_recon + 0.1 * L_noise + 0.1 * L_reg
 
-def train(dataloader, n_epochs=100):
+def train(dataloader, n_epochs=10):
 
     best_loss = float("inf")
 
     for epoch in range(n_epochs):
         total = 0
 
-        for edge_map, x0 in dataloader:
+        for batch in dataloader:
 
-            edge_map = edge_map.to(device, dtype=dtype)
-            x0 = x0.to(device, dtype=dtype)
+            edge_map = batch["edge_sd"].to(device, dtype=dtype)
+            x0 = batch["visible_sd"].to(device, dtype=dtype)
 
             optimizer.zero_grad()
 
@@ -157,14 +157,14 @@ def train(dataloader, n_epochs=100):
             
 dataset = EdgeToImageDataset(
     data_path=Path("/Volumes/Samsung_1TB/thermal_images/archive"),
-    image_size=256
+    image_size=128
 )
 
 dataloader = DataLoader(
     dataset,
-    batch_size=4,
+    batch_size=1,
     shuffle=True,
     num_workers=0
 )
 
-best_prompt_embedding = train(dataloader, n_epochs=10)
+best_prompt_embedding = train(dataloader, n_epochs=5)

@@ -33,12 +33,12 @@ def init():
     
     return device, model, scheduler, optimiser, trainable
 
-def save_debug_images(thermal, gt_edge, outputs, epoch):
+def save_debug_images(thermal, gt_edge, outputs, epoch, names):
     
     for i in range(min(2, thermal.size(0))):  # Save up to 2 samples per epoch
         # Save Ground Truth
         gt_np = (gt_edge[i, 0].cpu().numpy() * 255).astype(np.uint8)
-        Image.fromarray(gt_np).save(f"debug/ep{epoch}_samp{i}_gt.png")
+        Image.fromarray(gt_np).save(f"debug/ep{epoch}_{names[i]}_gt.png")
         
         # Save Side Outputs and Fused
         for j, pred in enumerate(outputs): # only fused outptus for now
@@ -48,10 +48,10 @@ def save_debug_images(thermal, gt_edge, outputs, epoch):
             
             label = f"side{j+1}" if j < 5 else "fused"
             if label == "fused":
-                Image.fromarray(p_img).save(f"debug/ep{epoch}_samp{i}_{label}.png")
+                Image.fromarray(p_img).save(f"debug/ep{epoch}_{names[i]}_{label}.png")
 
 def hed_loss(logits, gt, device):
-    mask = (gt > 0.3).float()  # Binarize ground truth for loss calculation
+    mask = (gt > 0.3).float()  # edges vs background
     pos_num = mask.float().sum()
     neg_num = (~mask.bool()).float().sum()
     total   = pos_num + neg_num
@@ -60,19 +60,18 @@ def hed_loss(logits, gt, device):
     alpha = neg_num / total   # weight for positives (edges)
     beta  = max(3 *  (pos_num / total), 0.4)  # weight for negatives (background)
 
-    bg_mask = (gt < 0.1).float()
 
     dist_weights = compute_distance_weights(gt, device)
     
     edge_loss = -alpha * gt * F.logsigmoid(logits)
-    
-    sparse_penalty = 0.5 * (torch.sigmoid(logits) * bg_mask).sum() / (bg_mask.sum() + 1e-6)  # encourage sparsity in edge predictions
+
+    tv_loss = compute_tv_loss(logits)
     
     bg_penalty = 1.0 - dist_weights
     
     bg_loss = -beta * (1 - gt) * F.logsigmoid(-logits) * bg_penalty
     
-    return (edge_loss + bg_loss).mean() + sparse_penalty
+    return (edge_loss + bg_loss).mean() + 0.1 * tv_loss
 
 def compute_distance_weights(gt, device, sigma = 5):
     weights = torch.zeros_like(gt)
@@ -88,7 +87,12 @@ def compute_distance_weights(gt, device, sigma = 5):
         
     return weights.to(gt.device)
 
-
+def compute_tv_loss(logits):
+    # Total Variation Loss to encourage smoothness
+    h_variation = torch.abs(logits[:,:,1:,:] - logits[:,:,:-1,:])
+    w_variation = torch.abs(logits[:,:,:,1:] - logits[:,:,:,:-1])
+    return (h_variation.mean() + w_variation.mean())
+    
 def run_epoch(loader, device, optimiser, model, epoch, trainable, train=True):
     model.train(train)
     total = 0.0
@@ -97,18 +101,19 @@ def run_epoch(loader, device, optimiser, model, epoch, trainable, train=True):
         for batch in loader:
             thermal = batch['thermal_raw'].to(device, dtype=torch.float32)
             gt_edge = batch['edge_raw'].to(device, dtype=torch.float32)
+            names = batch['name']
 
             gt_edge = gt_edge[:,0:1,:,:]  # ensure gt_edge has shape [B,1,H,W]
 
             outputs = model(thermal)  # [B,1,H,W] sigmoid output
 
             loss = 0 
-            weights = [0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 1]
+            weights = [0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 1]
             for i, pred in enumerate(outputs):
                 loss += weights[i] * hed_loss(pred, gt_edge, device)
             
             if not has_saved and not train:
-                save_debug_images(thermal, gt_edge, outputs, epoch)
+                save_debug_images(thermal, gt_edge, outputs, epoch, names)
                 has_saved = True
 
             if train:
@@ -146,7 +151,7 @@ def train(dataset):
         train_indices = rng.choice(train_pool, size=TRAIN_SAMPLES, replace=False).tolist()
         train_dl = DataLoader(
             dataset,
-            batch_size=4,
+            batch_size=16,
             sampler=train_indices,
             num_workers=0
         )

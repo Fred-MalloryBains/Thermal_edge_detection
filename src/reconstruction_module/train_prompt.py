@@ -1,152 +1,239 @@
-import torch 
-import torch.nn as nn
-from diffusers import StableDiffusionControlNetPipeline, ControlNetModel, DDIMScheduler
-from torchvision import transforms
-from torch.utils.data import DataLoader
+import torch
 import torch.nn.functional as F
-from PIL import Image
+from diffusers import StableDiffusionControlNetPipeline, ControlNetModel, DDIMScheduler
+from torch.utils.data import DataLoader
 from pathlib import Path
 
 from tools.dataloader import EdgeToImageDataset
 
-## This script learns the prompt that reduces average loss between the generated images and ground truth images.
 
+# Device setup
 device = "mps" if torch.backends.mps.is_available() else "cpu"
 dtype = torch.float32
 
-# Control Net model
+
+# ----------------------------
+# Load models
+# ----------------------------
 try:
     controlnet = ControlNetModel.from_pretrained(
-        "lllyasviel/sd-controlnet-hed", 
+        "lllyasviel/sd-controlnet-hed",
         torch_dtype=dtype
     )
 except Exception as error:
-    print (error)
+    print(error)
     exit(1)
 
 pipe = StableDiffusionControlNetPipeline.from_pretrained(
-    "runwayml/stable-diffusion-v1-5", 
-    controlnet=controlnet, 
+    "runwayml/stable-diffusion-v1-5",
+    controlnet=controlnet,
     torch_dtype=dtype
 )
 
-
+# Replace scheduler with DDIM (faster training)
 scheduler = DDIMScheduler.from_config(pipe.scheduler.config)
 scheduler.set_timesteps(6)
-
 pipe.scheduler = scheduler
+
 pipe = pipe.to(device)
+
+# Ensure correct scaling
 pipe.vae.scaling_factor = 0.18215
 model_dtype = next(pipe.unet.parameters()).dtype
 
 
+def debug_tensor(name, x):
+    print(f"{name}: requires_grad={x.requires_grad}, grad_fn={x.grad_fn}")
+    
+
+# ----------------------------
+# Textual inversion setup
+# ----------------------------
+
+# Add new learnable token
+placeholder_token = "<thermal>"
+num_added = pipe.tokenizer.add_tokens(placeholder_token)
+assert num_added == 1, "Token already exists"
+
+pipe.text_encoder.resize_token_embeddings(len(pipe.tokenizer))
+placeholder_token_id = pipe.tokenizer.convert_tokens_to_ids(placeholder_token)
+
+# Initialise embedding from a meaningful prompt
+initializer_prompt = "photorealistic, realistic colours, high resolution, urban scene, daylight"
+
 with torch.no_grad():
-    seed_tokens = pipe.tokenizer(
-        "photorealistic, realistic colours, high resolution, urban scene, daylight",
-        return_tensors="pt", 
+    tokens = pipe.tokenizer(
+        initializer_prompt,
+        return_tensors="pt",
         padding="max_length",
         max_length=pipe.tokenizer.model_max_length,
         truncation=True,
     ).to(device)
-    seed_embeddings = pipe.text_encoder(input_ids=seed_tokens.input_ids, attention_mask=seed_tokens.attention_mask).last_hidden_state
 
-v = seed_embeddings.detach().clone().to(device=device, dtype=model_dtype).requires_grad_(True)
+    seed_embeddings = pipe.text_encoder(**tokens).last_hidden_state
 
-optimiser = torch.optim.Adam([v], lr=1e-3, weight_decay=1e-5)
-lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-    optimiser, T_max=100, eta_min=1e-5
+# Use mean embedding as initial value
+init_embedding = seed_embeddings.mean(dim=1)[0]
+
+embedding_layer = pipe.text_encoder.get_input_embeddings()
+
+with torch.no_grad():
+    embedding_layer.weight[placeholder_token_id] = init_embedding
+
+
+# ----------------------------
+# Freeze all models
+# ----------------------------
+for p in pipe.unet.parameters():
+    p.requires_grad = False
+
+for p in controlnet.parameters():
+    p.requires_grad = False
+
+for p in pipe.vae.parameters():
+    p.requires_grad = False
+
+for p in pipe.text_encoder.parameters():
+    p.requires_grad = False
+
+# Enable gradients only on embedding matrix
+embedding_layer.weight.requires_grad = True
+
+
+# Optimiser
+optimiser = torch.optim.Adam(
+    embedding_layer.parameters(),
+    lr=5e-4
 )
 
-#@torch.no_grad()
+
+# ----------------------------
+# Helper functions
+# ----------------------------
+
 def encode_to_latent(im_tensor):
     im_tensor = im_tensor.to(device=device, dtype=model_dtype)
-    z = pipe.vae.encode(im_tensor).latent_dist.sample().to(model_dtype)
-    
-    scaling = torch.tensor(
-        pipe.vae.config.scaling_factor,
-        device=device,
-        dtype=model_dtype
-    )
-    
-    return z * scaling
+    z = pipe.vae.encode(im_tensor).latent_dist.sample()
+    return z * pipe.vae.config.scaling_factor
 
+
+def get_text_embeddings(prompts):
+    tokens = pipe.tokenizer(
+        prompts,
+        padding="max_length",
+        max_length=pipe.tokenizer.model_max_length,
+        truncation=True,
+        return_tensors="pt"
+    ).to(device)
+
+    return pipe.text_encoder(**tokens).last_hidden_state
+
+
+# ----------------------------
+# Training step
+# ----------------------------
+@torch.enable_grad()
 def training_step(edge_map, gt_img):
-    B = edge_map.shape[0]  # batch size
+    B = edge_map.shape[0]
+
     z_gt = encode_to_latent(gt_img)
 
-    # Repeat the learned prompt embedding
-    v_cond = v.repeat(B, 1, 1).to(device=device, dtype=model_dtype)
+    prompts = ["a <thermal> urban scene"] * B
+    e_cond = get_text_embeddings(prompts)
 
-    # --- TIMESTEPS (long for indexing) ---
-    t_idx = torch.randint(0, len(scheduler.timesteps), (B,), device="cpu")  # CPU long indices
-    timesteps = scheduler.timesteps[t_idx].to(device=device)  # keep long for scheduler
-    timesteps_float = timesteps.to(dtype=torch.float32)       # float32 for MPS arithmetic
+    #debug_tensor("e_cond", e_cond)
 
-    # --- NOISE ---
-    noise = torch.randn_like(z_gt, dtype=torch.float32)
+    t_idx = torch.randint(0, len(scheduler.timesteps), (B,), device="cpu")
+    timesteps = scheduler.timesteps[t_idx].to(device=device)
 
-    # Add noise to latent
-    z_noisy = scheduler.add_noise(z_gt, noise, timesteps)  # timesteps must be long
-    z_noisy = z_noisy.to(dtype=model_dtype)  # UNet expects model_dtype
+    noise = torch.randn_like(z_gt)
+    z_noisy = scheduler.add_noise(z_gt, noise, timesteps)
 
-    # ControlNet forward (no grad for memory)
-    with torch.no_grad():
+    with torch.inference_mode(False):
+        # Clone all inputs — tensors created outside inference_mode(False)
+        # are flagged as inference tensors and can't enter autograd
+        z_noisy_ = z_noisy.clone()
+        e_cond_  = e_cond.clone()
+        edge_    = edge_map.to(dtype=model_dtype).clone()
+
         down_block_res, mid_block_res = controlnet(
-            z_noisy,
-            timesteps_float,  # use float for MPS ops
-            encoder_hidden_states=v_cond,
-            controlnet_cond=edge_map.to(dtype=model_dtype),
+            z_noisy_,
+            timesteps.to(dtype=model_dtype),
+            encoder_hidden_states=e_cond_,
+            controlnet_cond=edge_,
             return_dict=False
         )
 
-    # UNet prediction
-    noise_pred = pipe.unet(
-        z_noisy,
-        timesteps_float,  # float for MPS
-        encoder_hidden_states=v_cond,
-        down_block_additional_residuals=down_block_res,
-        mid_block_additional_residual=mid_block_res,
-    ).sample
+        down_block_res = [r.clone() for r in down_block_res]
+        mid_block_res  = mid_block_res.clone()
 
-    # Compute loss
-    L_latent = F.mse_loss(noise_pred.float(), noise.float())
-    target_seed = seed_embeddings.detach().to(device=v.device, dtype=v.dtype)
-    L_reg = 0.01 * F.mse_loss(v[0], target_seed[0])
+        noise_pred = pipe.unet(
+            z_noisy_,
+            timesteps.to(dtype=model_dtype),
+            encoder_hidden_states=e_cond_,
+            down_block_additional_residuals=down_block_res,
+            mid_block_additional_residual=mid_block_res,
+        ).sample
 
-    return L_latent + L_reg
+    #debug_tensor("noise_pred", noise_pred)
 
-def train(dataloader: DataLoader, n_epochs: int = 100):
+    loss = F.mse_loss(noise_pred.float(), noise.float())
+
+    #debug_tensor("loss", loss)
+
+    return loss
+
+
+# ----------------------------
+# Training loop
+# ----------------------------
+
+def train(dataloader, n_epochs=100):
     best_loss = float("inf")
-    best_v = None
 
     for epoch in range(n_epochs):
         epoch_loss = 0.0
 
-        for edge_maps, rgb_targets in dataloader:
-            edge_maps   = edge_maps.to(device)
-            rgb_targets = rgb_targets.to(device)
+        for batch in dataloader:
+            edge_maps = batch["edge_sd"].to(device)
+            rgb_targets = batch["visible_sd"].to(device)
 
             optimiser.zero_grad()
+
             loss = training_step(edge_maps, rgb_targets)
             loss.backward()
+            
 
-            # Gradient clipping prevents v from jumping out of semantic space
-            torch.nn.utils.clip_grad_norm_([v], max_norm=1.0)
+            # Mask gradients so only the placeholder token is updated
+            with torch.no_grad():
+                grads = embedding_layer.weight.grad
+                mask = torch.zeros_like(grads)
+                mask[placeholder_token_id] = 1.0
+                embedding_layer.weight.grad *= mask
+
+            # Gradient clipping
+            torch.nn.utils.clip_grad_norm_(embedding_layer.parameters(), 1.0)
+
             optimiser.step()
 
             epoch_loss += loss.item()
 
         avg = epoch_loss / len(dataloader)
-        lr_scheduler.step()
 
         if avg < best_loss:
             best_loss = avg
-            best_v = v.detach().clone()
-            torch.save(best_v, f"best_v_epoch{epoch}.pt")
 
-        print(f"[{epoch:03d}] avg loss={avg:.5f}  lr={optimiser.param_groups[0]['lr']:.2e}")
+            learned_embedding = embedding_layer.weight[placeholder_token_id].detach().cpu()
+            torch.save(learned_embedding, "best_thermal_token.pt")
 
-    return best_v
+        print(f"[{epoch:03d}] avg loss={avg:.5f}")
+
+    return embedding_layer.weight[placeholder_token_id].detach().cpu()
+
+
+# ----------------------------
+# Dataset
+# ----------------------------
 
 dataset = EdgeToImageDataset(
     data_path=Path("/Volumes/Samsung_1TB/thermal_images/archive"),
@@ -155,9 +242,9 @@ dataset = EdgeToImageDataset(
 
 dataloader = DataLoader(
     dataset,
-    batch_size=4,
+    batch_size=1,
     shuffle=True,
     num_workers=0
 )
 
-best_prompt_embedding = train(dataloader, n_epochs=100)
+best_embedding = train(dataloader, n_epochs=100)

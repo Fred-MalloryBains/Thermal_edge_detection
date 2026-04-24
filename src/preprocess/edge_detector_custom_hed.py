@@ -83,7 +83,7 @@ def process_edge_pytorch(img_path):
 
         fused = outputs[-1] if isinstance(outputs, tuple) else outputs
         fused = torch.sigmoid(fused)  # Ensure output is in [0, 1] range
-        #fused = fused > 0.5
+        fused = torch.where(fused > 0.1, fused, torch.zeros_like(fused))
 
     # 5. Post-process back to OpenCV format
     # Move to CPU, remove batch/channel dims, and scale back to uint8

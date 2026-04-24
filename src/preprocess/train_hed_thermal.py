@@ -20,7 +20,7 @@ def init():
     for name, param in model.named_parameters():
         # Unfreeze the Score layers, the Combine layer, AND the first VGG block
         is_trainable = any(name.startswith(b) for b in [
-            'netScore', 'netCombine', 'netVggOne' 
+            'netScore', 'netCombine'
         ])
         param.requires_grad_(is_trainable)
 
@@ -50,48 +50,73 @@ def save_debug_images(thermal, gt_edge, outputs, epoch, names):
             if label == "fused":
                 Image.fromarray(p_img).save(f"debug/ep{epoch}_{names[i]}_{label}.png")
 
-def hed_loss(logits, gt, device):
-    mask = (gt > 0.3).float()  # edges vs background
-    pos_num = mask.float().sum()
-    neg_num = (~mask.bool()).float().sum()
-    total   = pos_num + neg_num
-
-    # Natural class-balanced weights — don't modify these
-    alpha = neg_num / total   # weight for positives (edges)
-    beta  = max(3 *  (pos_num / total), 0.4)  # weight for negatives (background)
-
-
-    dist_weights = compute_distance_weights(gt, device)
+def focal_loss(pred_logits: torch.Tensor, gt: torch.Tensor, 
+               alpha: float = 0.95, gamma: float = 3.0):
     
-    edge_loss = -alpha * gt * F.logsigmoid(logits)
-
-    tv_loss = compute_tv_loss(logits)
+    bce = F.binary_cross_entropy_with_logits(pred_logits, gt, reduction='none')
     
-    bg_penalty = 1.0 - dist_weights
+    p = torch.sigmoid(pred_logits)
+    # p_t: probability of the TRUE class at each pixel
+    p_t = p * gt + (1 - p) * (1 - gt)
+    # alpha_t: per-pixel class weight
+    alpha_t = alpha * gt + (1 - alpha) * (1 - gt)
     
-    bg_loss = -beta * (1 - gt) * F.logsigmoid(-logits) * bg_penalty
+    focal_weight = alpha_t * (1 - p_t) ** gamma
+    return (focal_weight * bce).mean()
+
+
+def soft_dice_loss(pred_logits: torch.Tensor, gt: torch.Tensor,
+                   smooth: float = 1.0):
     
-    return (edge_loss + bg_loss).mean() + 0.1 * tv_loss
+    p = torch.sigmoid(pred_logits)
+    
+    # Flatten spatial dims, keep batch
+    p_flat = p.view(p.size(0), -1)
+    gt_flat = gt.view(gt.size(0), -1)
+    
+    intersection = (p_flat * gt_flat).sum(dim=1)
+    dice = (2.0 * intersection + smooth) / (p_flat.sum(dim=1) + gt_flat.sum(dim=1) + smooth)
+    
+    return 1.0 - dice.mean()
 
-def compute_distance_weights(gt, device, sigma = 5):
-    weights = torch.zeros_like(gt)
-    for b in range(gt.shape[0]):
-        mask_np = gt[b,0].cpu().numpy().astype(bool)
-        if mask_np.any():
-            dt = distance_transform_edt(~mask_np)
-            w = np.exp(-dt/ sigma).astype(np.float32)
-            w = np.clip(w, 0.1, 0.9) # avoid extreme convergence
-        else:
-            w = np.zeros(mask_np.shape, dtype=np.float32)
-        weights[b,0] = torch.from_numpy(w)
-        
-    return weights.to(gt.device)
 
-def compute_tv_loss(logits):
-    # Total Variation Loss to encourage smoothness
-    h_variation = torch.abs(logits[:,:,1:,:] - logits[:,:,:-1,:])
-    w_variation = torch.abs(logits[:,:,:,1:] - logits[:,:,:,:-1])
-    return (h_variation.mean() + w_variation.mean())
+def boundary_iou_loss(pred_logits, gt,
+                      dilation_px: int = 4, smooth: float = 1.0):
+    
+    p = torch.sigmoid(pred_logits)
+    
+    # Build dilation kernel
+    k = 2 * dilation_px + 1
+    kernel = torch.ones(1, 1, k, k, device=pred_logits.device, dtype=pred_logits.dtype)
+    pad = dilation_px
+    
+    # Dilate GT: any pixel within dilation_px of a GT edge becomes "valid"
+    gt_dilated = F.conv2d(gt, kernel, padding=pad).clamp(0, 1)
+    # Dilate prediction: allows pred edges to "reach" toward GT
+    p_dilated  = F.conv2d(p,  kernel, padding=pad).clamp(0, 1)
+    
+    p_flat  = p_dilated.view(p.size(0), -1)
+    gt_flat = gt_dilated.view(gt.size(0), -1)
+    
+    intersection = (p_flat * gt_flat).sum(dim=1)
+    union        = (p_flat + gt_flat - p_flat * gt_flat).sum(dim=1)
+    iou          = (intersection + smooth) / (union + smooth)
+    
+    return 1.0 - iou.mean()
+
+
+def hed_loss(pred_logits: torch.Tensor, gt: torch.Tensor,
+             device: torch.device,
+             w_focal: float = 0.5,
+             w_dice: float = 0.3,
+             w_biou: float = 0.2):
+    
+    fl  = focal_loss(pred_logits, gt)
+    dl  = soft_dice_loss(pred_logits, gt)
+    bil = boundary_iou_loss(pred_logits, gt)
+    
+    return w_focal * fl + w_dice * dl + w_biou * bil
+    
     
 def run_epoch(loader, device, optimiser, model, epoch, trainable, train=True):
     model.train(train)
@@ -108,7 +133,7 @@ def run_epoch(loader, device, optimiser, model, epoch, trainable, train=True):
             outputs = model(thermal)  # [B,1,H,W] sigmoid output
 
             loss = 0 
-            weights = [0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 1]
+            weights = [0.3, 0.3, 0.4, 0.5, 0.6, 0.7, 1]
             for i, pred in enumerate(outputs):
                 loss += weights[i] * hed_loss(pred, gt_edge, device)
             

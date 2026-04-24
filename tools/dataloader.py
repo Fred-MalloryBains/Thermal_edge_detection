@@ -114,8 +114,8 @@ class EdgeToImageDataset(torch.utils.data.Dataset):
         
         edge = edge.astype(np.float32) / 255.0
         
-        kernel = np.ones((3,3), np.uint8)
-        edge = cv2.dilate(edge, kernel, iterations=1)
+        #kernel = np.ones((3,3), np.uint8)
+        #edge = cv2.dilate(edge, kernel, iterations=1)
         
         edge = cv2.GaussianBlur(edge, (3,3), 0)
         

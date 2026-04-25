@@ -44,7 +44,7 @@ def load_textual_inversion(pipe,device, delta_path):
     return pipe, token_name
     
 
-def generate(pipe, device, dtype, token_name, input_path, output_path):
+def generate(pipe, device, dtype, input_path, output_path, token_name=None):
     # ---- Reconstruct seed_emb exactly as in training ----
     SEED_PROMPT = "photorealistic urban scene, high resolution, 8k, sharp, structured"  # must match training
     negative_prompt = """
@@ -52,6 +52,10 @@ def generate(pipe, device, dtype, token_name, input_path, output_path):
     oversaturated, monochrome, distorted geometry
     """
     
+    if token_name:
+        prompt = SEED_PROMPT + token_name
+    else:
+        prompt = SEED_PROMPT
     
     # ---- Load edge image ----
     edge_path = input_path
@@ -59,7 +63,7 @@ def generate(pipe, device, dtype, token_name, input_path, output_path):
 
     # ---- Run pipeline ----
     output = pipe(
-        prompt=SEED_PROMPT + f" {token_name}",  # Use the new token in the prompt
+        prompt=prompt,  # Use the new token in the prompt
         negative_prompt=negative_prompt,
         image=edge_img,
         num_inference_steps=34,

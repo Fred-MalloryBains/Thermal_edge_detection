@@ -8,22 +8,21 @@ default values matching the repository structure
 Further conditioning to be added TBD
 """
 
-from tools.dataloader import ThermalDataset
+#from tools.dataloader import ThermalDataset
 import argparse 
-import Image
+from PIL import Image
 import torch
 import os
 
 from src.preprocess.edge_detector_custom_hed import process_edge_pytorch
-from src.reconstruction_module.reconstruction_hed import generate, init
+from src.reconstruction_module.token_reconstruction import generate, init
 
 EDGE_DIRECTORY = "outputs/edges"
 
-def create_edge_map(input_dir): 
-    img = Image.open(input_dir).convert("RGB")
-    edge_map = process_edge_pytorch(img)
+def create_edge_map(input_file): 
+    edge_map = process_edge_pytorch(input_file)
     edge_map = Image.fromarray(edge_map)
-    edge_map.save(EDGE_DIRECTORY + "/" + os.path.basename(input_dir).replace(".jpg", "_edge.png"))
+    edge_map.save(EDGE_DIRECTORY + "/" + os.path.basename(input_file).replace(".jpg", "_edge.png"))
     return edge_map
 
 def reconstruct_image(edge_map, output_path):
@@ -46,7 +45,7 @@ def reconstruct_image(edge_map, output_path):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Evaluation pipeline for thermal to RGB conversion")
-    parser.add_argument("--input_file", type=str, default="outputs/baseline/edges/", help="Directory containing edge maps")
+    parser.add_argument("--input_file", type=str, default="outputs/baseline/lwir/example_one", help="Directory containing edge maps")
     parser.add_argument("--output_dir", type=str, default="outputs/baseline/reconstruction/", help="Directory to save reconstructed images")
     args = parser.parse_args()
     
@@ -63,5 +62,4 @@ if __name__ == "__main__":
                                os.path.basename(args.input_file).replace(".jpg", "_recon.png")
                                )
     reconstruct_image(edge_map, output_path)
-    
     

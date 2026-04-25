@@ -138,7 +138,7 @@ def training_step(edge_map, gt_img):
 
     z_gt = encode_to_latent(gt_img)
 
-    prompts = ["a <thermal> urban scene"] * B
+    prompts = ["<thermal> urban scene"] * B
     e_cond = get_text_embeddings(prompts)
 
     #debug_tensor("e_cond", e_cond)

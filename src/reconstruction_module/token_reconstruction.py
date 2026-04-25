@@ -64,7 +64,7 @@ def generate(pipe, device, dtype, token_name, input_path, output_path):
         image=edge_img,
         num_inference_steps=34,
         controlnet_conditioning_scale=1.0,
-        guidance_scale=6.0
+        guidance_scale=9.0
     ).images[0]
 
     output.save(output_path)

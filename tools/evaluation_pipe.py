@@ -15,7 +15,7 @@ import torch
 import os
 
 from src.preprocess.edge_detector_custom_hed import process_edge_pytorch
-from src.reconstruction_module.reconstruction_hed import generate, init
+from baseline.reconstruction_hed import generate, init
 
 EDGE_DIRECTORY = "outputs/edges"
 

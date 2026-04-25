@@ -88,8 +88,6 @@ def generate(pipe, device, dtype, input_path, output_path):
 if __name__ == "__main__":
     pipe, device, dtype = init()
     delta = torch.load("best_thermal_token.pt", map_location=device) 
-    print ("shape of delta:", delta.shape)
-    print (torch.norm(delta).item())
     generate(
         pipe=pipe,
         device=device,

@@ -44,7 +44,7 @@ def generate(input_path, output_path, prompt, negative_prompt, device, dtype):
         image=edge_img,
         num_inference_steps=34, # UniPC is fast; 20-25 steps is usually enough
         controlnet_conditioning_scale=1.0,
-        guidance_scale=9
+        guidance_scale=6
     ).images[0]
 
     output.save(output_path)
@@ -61,12 +61,12 @@ if __name__ == "__main__":
     oversaturated, monochrome, distorted geometry
     """
     #edge_path = "outputs/baseline/edges/edges_visible_hed.png"
-    edge_path = "debug/ep0_set01_V005_I00150_fused.png"
+    edge_path = "debug/ep5_set01_V005_I00150_fused.png"
     
     
     generate(
         input_path=edge_path, 
-        output_path="outputs/baseline/reconstruction/recon_thermal.png", 
+        output_path="outputs/baseline/reconstruction/recon_thermal_nt6.png", 
         prompt=prompt, 
         negative_prompt=negative_prompt, 
         device=device,

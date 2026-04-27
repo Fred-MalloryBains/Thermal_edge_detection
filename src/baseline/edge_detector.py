@@ -6,55 +6,52 @@ from scipy import ndimage
 import numpy as np 
 from PIL import Image
 
-data_path = Path("/Volumes/Samsung_1TB/thermal_images/archive/").expanduser()
 
-pairs = []
+def canny_edge_detection(image):
+    return cv2.Canny(image, 70, 150)
 
-for visible_path in data_path.glob("set*/V*/visible/*.jpg"):
-    
-    thermal_path = visible_path.parents[1] / "lwir" / visible_path.name
-    
-    if thermal_path.exists():
-        pairs.append((visible_path, thermal_path))
-
-print("Total pairs:", len(pairs))
-print(pairs[:3])
-
-def preprocess_image(image):
-    blurred = cv2.GaussianBlur(image, (5, 5), 0)
-    clahe = cv2.createCLAHE(clipLimit=1.5, tileGridSize=(8, 8))
-    edges = clahe.apply(blurred)
-    return edges
-
-def normalize_image(image_path):
-    img = cv2.imread(str(image_path), cv2.IMREAD_GRAYSCALE)
-    
-    normalized = cv2.normalize(img, None, 0, 255, cv2.NORM_MINMAX)
-    return normalized
-
-def calculate_canny_percentile(image):
+def sobel_edge_detection(image):
     gx = cv2.Sobel(image, cv2.CV_64F, 1, 0, ksize=3)
     gy = cv2.Sobel(image, cv2.CV_64F, 0, 1, ksize=3)
     magnitude = np.sqrt(gx**2 + gy**2)
+    return cv2.normalize(magnitude, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
 
-    low = np.percentile(magnitude, 80)
-    high = np.percentile(magnitude, 95)
+def compare_edges(image_path, output_dir="outputs/comparison"):
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Load GRAYSCALE (critical fix)
+    image = cv2.imread(str(image_path), cv2.IMREAD_GRAYSCALE)
+    colour_image = cv2.imread(str(image_path))  # For side-by-side comparison
+    # Apply methods
+    sobel = sobel_edge_detection(image)
+    canny = canny_edge_detection(image)
+
+    # Save outputs
+    cv2.imwrite(str(output_dir / "sobel.jpg"), sobel)
+    cv2.imwrite(str(output_dir / "canny.jpg"), canny)
+
+    sobel_bgr = cv2.cvtColor(sobel, cv2.COLOR_GRAY2BGR)
+    canny_bgr = cv2.cvtColor(canny, cv2.COLOR_GRAY2BGR)
+
+    comparison = np.hstack([colour_image, sobel_bgr, canny_bgr])
+
+
+    cv2.imwrite(str(output_dir / "comparison.jpg"), comparison)
+
+def process_image(img):
+        denoised = cv2.bilateralFilter(img, 9, 75, 75)
+        clahe_low = cv2.createCLAHE(clipLimit=1.0, tileGridSize=(8,8)).apply(denoised)
+        clahe_mid = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8)).apply(denoised)
+        clahe_high = cv2.createCLAHE(clipLimit=4.0, tileGridSize=(8,8)).apply(denoised)
+        pseudo_rgb = cv2.merge([clahe_low, clahe_mid, clahe_high])
+        
+        cv2.imwrite("outputs/baseline/normal/processed_low.jpg", clahe_low)
+        cv2.imwrite("outputs/baseline/normal/processed_mid.jpg", clahe_mid)
+        cv2.imwrite("outputs/baseline/normal/processed_high.jpg", clahe_high)
+        cv2.imwrite("outputs/baseline/normal/processed_merge.jpg", pseudo_rgb)
     
-    edges = cv2.Canny(image, low, high)
-    
-    return edges
-for i in range(0,10):
-    print (f"Processing pair {i+1}/{len(pairs)}: {pairs[i][0].name} and {pairs[i][1].name}")
-    
-"""    
-for i in range (0,10):
-    visible_path, thermal_path = pairs[i]
-    therm_img = normalize_image(thermal_path)
-    vis_img = normalize_image(visible_path)
-    vis_img = preprocess_image(vis_img)
-    therm_img = preprocess_image(therm_img)
-    thermal_edges = calculate_canny_percentile(therm_img)
-    visible_edges = calculate_canny_percentile(vis_img)
-    Image.fromarray(thermal_edges).save(f"outputs/edges_thermal_{i}.png")
-    Image.fromarray(visible_edges).save(f"outputs/edges_visible_{i}.png")
-"""
+if __name__ == "__main__":
+    image_path = "outputs/baseline/lwir/example_one.jpg"
+    #compare_edges(image_path)
+    process_image(cv2.imread(image_path, cv2.IMREAD_GRAYSCALE))

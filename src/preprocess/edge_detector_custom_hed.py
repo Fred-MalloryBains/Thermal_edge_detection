@@ -10,6 +10,8 @@ import sys
 sys.path.insert(0, '.')
 from src.preprocess.run import Network
 
+from torchvision import transforms
+
 
 # 1. GLOBAL PYTORCH INITIALIZATION
 
@@ -19,7 +21,7 @@ device = torch.device("mps" if torch.backends.mps.is_available() else "cuda" if 
 pytorch_net = Network().to(device)
 weights_path = "hed_thermal.pth"
 
-# Load weights and set to eval mode (CRITICAL for deterministic inference)
+# Load weights and set to eval mode 
 pytorch_net.load_state_dict(torch.load(weights_path, map_location=device))
 pytorch_net.eval() 
 
@@ -49,7 +51,11 @@ def preprocess_image_two(thermal_img):
 
 
 
-
+def raw_transform(img):
+    return transforms.Compose([
+        transforms.Resize((512, 512)),
+        transforms.ToTensor(),
+    ])(img)
 
 
 # 3. THE NEW PYTORCH INFERENCE FUNCTION
@@ -58,24 +64,17 @@ def process_edge_pytorch(img_path):
     # 1. Read and preprocess
     img = cv2.imread(str(img_path), cv2.IMREAD_GRAYSCALE)
     
+    processed_img = preprocess_image_two(img)  # Apply the same preprocessing as during training
+    tensor_img = raw_transform(Image.fromarray(processed_img)).unsqueeze(0).to(device)
     
-    img = preprocess_image_two(img)  # Apply the same preprocessing as during training
-    img = Image.fromarray(img).convert("RGB")  
-    img = np.array(img)  
     # 3. Format for PyTorch
-    # The sniklaus 'forward' function expects values in [0.0, 1.0].
-    # It handles multiplying by 255 and subtracting ImageNet means internally.
-    tensor_img = torch.from_numpy(img).float() / 255.0
-    
-    # Permute from [H, W, C] to [C, H, W] and add Batch dimension [1, C, H, W]
-    tensor_img = tensor_img.permute(2, 0, 1).unsqueeze(0).to(device)
-
+   
     # 4. Run Inference without calculating gradients
     with torch.no_grad():
         outputs = pytorch_net(tensor_img)
         fused = outputs[-1] if isinstance(outputs, tuple) else outputs
         fused = torch.sigmoid(fused)  # Ensure output is in [0, 1] range
-        #fused = torch.where(fused > 0.2, fused, torch.zeros_like(fused))
+        fused = torch.where(fused > 0.1, fused, torch.zeros_like(fused))
 
     # 5. Post-process back to OpenCV format
     # Move to CPU, remove batch/channel dims, and scale back to uint8
@@ -86,6 +85,8 @@ def process_edge_pytorch(img_path):
     return edge_map
 
 
+def post_process(edge_map):
+    return edge_map
 
 # 4. EXECUTION
 
@@ -97,12 +98,12 @@ def run():
     os.makedirs("outputs/edges_hed", exist_ok=True)
 
     for i, (visible_path, thermal_path) in enumerate(pairs[:10]):
-        print(f"Processing pair {i+1}/{len(pairs)}: {visible_path.name} and {thermal_path.name}")
+        print(f"Processing pair {i+1}/{len(pairs)}: {visible_path}")
         
         # Call the new PyTorch function
-        edge_map = process_edge_pytorch(thermal_path)
-        
-        Image.fromarray(edge_map).save(f"outputs/edges_hed_custom/edges_hed{thermal_path.stem}.png")
+        #edge_map = process_edge_pytorch(thermal_path)
+        #outputs = post_process(edge_map)
+        #Image.fromarray(outputs).save(f"outputs/edges_hed_custom/edges_hed{thermal_path.stem}.png")
 
 if __name__ == "__main__":
     run()

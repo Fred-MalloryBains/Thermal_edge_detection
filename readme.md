@@ -3,19 +3,47 @@
 This code follows an investigation for bridging the domain gap between VL and IR images using 
 ControlNet, a conditioning constraint for stable diffusion. This project aims to improve the interpretability of thermal images through improved performance metrics centred around practical applications such as low light surveilance and autonomous vehicles.
 
-## Edge Detection
+## Implementation
 
-ControlNet uses image-to-image translation, which relies on an edge map image input generated from the thermal image. In this project, HED (Hollistically Nested Edge detection) is used to generate the edge mappings. The preprocessing module uses openCV and a 2x2 CNN bridges the domain gap between the "blobs", the inputs for the DNN network, to construct an edge mapping.
+To run the end-to-end thermal to reconstruction pipeline, clone the repository and create a virtual environment to install the dependencies in the `requirements.txt` file:
 
-Logic for this is found in [/src/preprocess/edge_detector_hed.py](/src/preprocess/edge_detector_hed.py) and is saved in [/outputs/edged_hed](/outputs/edges_hed)
+```
+python3.11 -m venv .venv
+pip install -r requirements.txt
+```
 
-Eg:
-![HED edge detection example](/outputs/edges_hed/edges_hed_example.png)
+To pipeline is handled in `tools/'evaluation_pipe.py`, call this in the command line with the arguments as shown:
 
-<br>
+```
+python -m tools.evaluation.pipe --input_file <path_to_image_file> --output_dir <path_to_output_directory>
+```
 
-## Reconsturction uses controlNet
+Results are save as a .png file in the directory specified, example usage shown below: 
 
-ControlNet reconstruction uses a pretrained stable diffusion model and edge detection to tranlsate the image into the VL domain. The prompt has been designed using a loss model for tokenisation using the evaluation metrics discussed below.
-a
-The script for this is found in [/src/reconstruction_module/reconstruction_hed.py](/src/reconstruction_module/reconstruction_hed.py) and is saved in [/outputs/results](/outputs/results)
+[placeholder for image]
+
+
+## Training setup 
+
+The image translation pipeline makes use of a deep learning edge detection network HED to condition stable diffusion through controlNet
+
+[HED placeholder]
+
+[ControlNet placeholder]
+
+The edge detection was tuned on refining the thermal outputs to reduce focal, boundaryIoU and DICE loss. This implementation is found in `src/preprocess/train_hed_thermal` with the data loaded from `tools/dataloader.py`
+The saved model weights named `hed_thermal.pth`
+
+[before transfer learning]
+[after transfer learning]
+
+To capture the scene reconstruction through the stable diffusion prompt, textual inversion was trained using `src/reconstruction_module/text_inversion.py`. 
+The saved tokens are named `best_thermal_token.pt`
+
+
+## Key references 
+
+ControlNet: 
+Textual Inversion:
+Hollistically Nested Edge Detection: 
+Base HED model: 

@@ -18,26 +18,29 @@ torch.backends.cudnn.enabled = True # make sure to use cudnn for computational p
 
 ##########################################################
 
-args_strModel = 'bsds500' # only 'bsds500' for now
-args_strIn = './images/sample.png'
-args_strOut = './out.png'
+
 
 device = "mps" if torch.backends.mps.is_available() else "cpu"
 
-for strOption, strArg in getopt.getopt(sys.argv[1:], '', [
-    'model=',
-    'in=',
-    'out=',
-])[0]:
-    if strOption == '--model' and strArg != '': args_strModel = strArg # which model to use
-    if strOption == '--in' and strArg != '': args_strIn = strArg # path to the input image
-    if strOption == '--out' and strArg != '': args_strOut = strArg # path to where the output should be stored
-# end
+if __name__ == "__main__":
+    args_strModel = 'bsds500' # only 'bsds500' for now
+    args_strIn = './images/sample.png'
+    args_strOut = './out.png'
+
+    for strOption, strArg in getopt.getopt(sys.argv[1:], '', [
+        'model=',
+        'in=',
+        'out=',
+    ])[0]:
+        if strOption == '--model' and strArg != '': args_strModel = strArg # which model to use
+        if strOption == '--in' and strArg != '': args_strIn = strArg # path to the input image
+        if strOption == '--out' and strArg != '': args_strOut = strArg # path to where the output should be stored
+    # end
 
 ##########################################################
 
 class Network(torch.nn.Module):
-    def __init__(self):
+    def __init__(self, model = 'bsds500'):
         super().__init__()
 
         self.netVggOne = torch.nn.Sequential(
@@ -96,7 +99,7 @@ class Network(torch.nn.Module):
             #torch.nn.Sigmoid()
         )
 
-        self.load_state_dict({ strKey.replace('module', 'net'): tenWeight for strKey, tenWeight in torch.hub.load_state_dict_from_url(url='http://content.sniklaus.com/github/pytorch-hed/network-' + args_strModel + '.pytorch', file_name='hed-' + args_strModel).items() })
+        self.load_state_dict({ strKey.replace('module', 'net'): tenWeight for strKey, tenWeight in torch.hub.load_state_dict_from_url(url='http://content.sniklaus.com/github/pytorch-hed/network-' + model + '.pytorch', file_name='hed-' + model).items() })
     # end
 
     def forward(self, tenInput):

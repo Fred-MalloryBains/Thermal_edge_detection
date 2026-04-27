@@ -51,15 +51,21 @@ class EdgeToImageDataset(torch.utils.data.Dataset):
         thermal_img = Image.fromarray(thermal_img).convert("RGB")  # conver to 3 channel array
         
         edge_map_three = self.process_edge_soft(visible_path)
-        #edge_map_three = Image.fromarray(edge_map_three).convert("L")  # Convert to PIL Image in grayscale
         edge_map_one = Image.fromarray(edge_map_three).convert("L")  # Convert to PIL Image in grayscale
+        edge_map_three = Image.fromarray(edge_map_three).convert("RGB")  # Convert to PIL Image in RGB
+        
+        visible_img = cv2.imread(str(visible_path))
+        visible_img = Image.fromarray(visible_img).convert("RGB")
+        
+        
 
         #print(f"Edge map shape: {edge_map_one.size}")
         #print(f"Thermal image shape: {thermal_img.size}")
         
         return {
-            #'thermal_sd': self.sd_transform(thermal_img),
-            #'edge_sd': self.sd_transform(edge_map_three),
+            'thermal_sd': self.sd_transform(thermal_img),
+            'visible_sd': self.sd_transform(visible_img),
+            'edge_sd': self.sd_transform(edge_map_three),
             'thermal_raw': self.raw_transform(thermal_img),
             'edge_raw': self.raw_transform(edge_map_one),
             'name' : thermal_path.parents[2].name + "_" + thermal_path.parents[1].name + "_" + thermal_path.stem
@@ -75,7 +81,7 @@ class EdgeToImageDataset(torch.utils.data.Dataset):
             
                 if thermal_path.exists():
                     pairs.append((visible_path, thermal_path))
-        return pairs
+        return pairs[:32]  # Limit to first 32 pairs for now
     
     def process_image(self, img):
         denoised = cv2.bilateralFilter(img, 9, 75, 75)

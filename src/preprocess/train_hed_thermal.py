@@ -29,7 +29,7 @@ def init():
 
 
     optimiser = torch.optim.Adam(trainable, lr=5e-5)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimiser, T_max=100, eta_min=1e-5)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimiser, T_0=40, T_mult=1, eta_min=1e-5)
     
     return device, model, scheduler, optimiser, trainable
 
@@ -51,7 +51,7 @@ def save_debug_images(thermal, gt_edge, outputs, epoch, names):
                 Image.fromarray(p_img).save(f"debug/ep{epoch}_{names[i]}_{label}.png")
 
 def focal_loss(pred_logits: torch.Tensor, gt: torch.Tensor, 
-               alpha: float = 0.95, gamma: float = 3.0):
+               alpha: float = 0.95, gamma: float = 4.0):
     
     bce = F.binary_cross_entropy_with_logits(pred_logits, gt, reduction='none')
     
@@ -114,8 +114,10 @@ def hed_loss(pred_logits: torch.Tensor, gt: torch.Tensor,
     fl  = focal_loss(pred_logits, gt)
     dl  = soft_dice_loss(pred_logits, gt)
     bil = boundary_iou_loss(pred_logits, gt)
+    sparsity = torch.sigmoid(pred_logits).mean()
     
-    return w_focal * fl + w_dice * dl + w_biou * bil
+    
+    return w_focal * fl + w_dice * dl + w_biou * bil + 0.13 * sparsity
     
     
 def run_epoch(loader, device, optimiser, model, epoch, trainable, train=True):
@@ -133,7 +135,7 @@ def run_epoch(loader, device, optimiser, model, epoch, trainable, train=True):
             outputs = model(thermal)  # [B,1,H,W] sigmoid output
 
             loss = 0 
-            weights = [0.3, 0.3, 0.4, 0.5, 0.6, 0.7, 1]
+            weights = [0.01, 0.01, 0.05, 0.1, 0.15, 0.2, 1]
             for i, pred in enumerate(outputs):
                 loss += weights[i] * hed_loss(pred, gt_edge, device)
             
@@ -154,8 +156,8 @@ def train(dataset):
     device, model, scheduler, optimiser, trainable = init ()
 
 
-    TRAIN_SAMPLES = 100 
-    VAL_SAMPLES = 20
+    TRAIN_SAMPLES = 1500
+    VAL_SAMPLES = 375
 
 
     rng = np.random.default_rng(seed=42)
@@ -172,11 +174,11 @@ def train(dataset):
     )
 
     best_val = float("inf")
-    for epoch in range(150):
+    for epoch in range(100):
         train_indices = rng.choice(train_pool, size=TRAIN_SAMPLES, replace=False).tolist()
         train_dl = DataLoader(
             dataset,
-            batch_size=16,
+            batch_size=32,
             sampler=train_indices,
             num_workers=0
         )
@@ -188,7 +190,7 @@ def train(dataset):
 
         if val_loss < best_val:
             best_val = val_loss
-            torch.save(model.state_dict(), "hed_thermal.pth")
+            torch.save(model.state_dict(), "hed_thermal_v2.pth")
             print(f"  saved (val={val_loss:.4f})")
             
 if __name__ == "__main__":

@@ -1,163 +1,228 @@
-import torch 
-import torch.nn as nn
-from diffusers import StableDiffusionControlNetPipeline, ControlNetModel, DDIMScheduler
-from torchvision import transforms
-from torch.utils.data import DataLoader
+import torch
 import torch.nn.functional as F
-from PIL import Image
+from diffusers import StableDiffusionControlNetPipeline, ControlNetModel, DDIMScheduler
+from torch.utils.data import DataLoader
 from pathlib import Path
 
 from tools.dataloader import EdgeToImageDataset
 
-## This script learns the prompt that reduces average loss between the generated images and ground truth images.
-
 device = "mps" if torch.backends.mps.is_available() else "cpu"
 dtype = torch.float32
 
-# Control Net model
 try:
     controlnet = ControlNetModel.from_pretrained(
-        "lllyasviel/sd-controlnet-hed", 
+        "lllyasviel/sd-controlnet-hed",
         torch_dtype=dtype
     )
 except Exception as error:
-    print (error)
+    print(error)
     exit(1)
 
 pipe = StableDiffusionControlNetPipeline.from_pretrained(
-    "runwayml/stable-diffusion-v1-5", 
-    controlnet=controlnet, 
+    "runwayml/stable-diffusion-v1-5",
+    controlnet=controlnet,
     torch_dtype=dtype
 )
 
-
 scheduler = DDIMScheduler.from_config(pipe.scheduler.config)
-scheduler.set_timesteps(6)
-
+scheduler.set_timesteps(200)
 pipe.scheduler = scheduler
+
 pipe = pipe.to(device)
 pipe.vae.scaling_factor = 0.18215
 model_dtype = next(pipe.unet.parameters()).dtype
 
 
+# ----------------------------
+# Textual inversion setup — CHANGED: multiple tokens
+# ----------------------------
+
+placeholder_tokens = ["<thermal-1>", "<thermal-2>", "<thermal-3>"] 
+num_added = pipe.tokenizer.add_tokens(placeholder_tokens)           
+assert num_added == len(placeholder_tokens), "Tokens already exist" 
+
+pipe.text_encoder.resize_token_embeddings(len(pipe.tokenizer))
+
+placeholder_token_ids = [                                           # CHANGED
+    pipe.tokenizer.convert_tokens_to_ids(t) for t in placeholder_tokens
+]
+
+embedding_layer = pipe.text_encoder.get_input_embeddings()
+
+# initialise each token from a different word to break symmetry
+init_words = ["photorealistic", "daylight", "urban"]
 with torch.no_grad():
-    seed_tokens = pipe.tokenizer(
-        "photorealistic, realistic colours, high resolution, urban scene, daylight",
-        return_tensors="pt", 
+    for token_id, word in zip(placeholder_token_ids, init_words):
+        word_id = pipe.tokenizer.convert_tokens_to_ids(word)
+        embedding_layer.weight[token_id] = embedding_layer.weight[word_id].clone()
+
+
+# ----------------------------
+# Freeze all models
+# ----------------------------
+for p in pipe.unet.parameters():
+    p.requires_grad = False
+
+for p in controlnet.parameters():
+    p.requires_grad = False
+
+for p in pipe.vae.parameters():
+    p.requires_grad = False
+
+for p in pipe.text_encoder.parameters():
+    p.requires_grad = False
+
+embedding_layer.weight.requires_grad = True
+
+optimiser = torch.optim.Adam(
+    embedding_layer.parameters(),
+    lr=1e-3
+)
+
+
+# ----------------------------
+# Helper functions
+# ----------------------------
+
+def encode_to_latent(im_tensor):
+    im_tensor = im_tensor.to(device=device, dtype=model_dtype)
+    z = pipe.vae.encode(im_tensor).latent_dist.sample()
+    return z * pipe.vae.config.scaling_factor
+
+
+def get_text_embeddings(prompts):
+    tokens = pipe.tokenizer(
+        prompts,
         padding="max_length",
         max_length=pipe.tokenizer.model_max_length,
         truncation=True,
+        return_tensors="pt"
     ).to(device)
-    seed_embeddings = pipe.text_encoder(input_ids=seed_tokens.input_ids, attention_mask=seed_tokens.attention_mask).last_hidden_state
+    return pipe.text_encoder(**tokens).last_hidden_state
 
-v = seed_embeddings.detach().clone().to(device=device, dtype=model_dtype).requires_grad_(True)
 
-optimiser = torch.optim.Adam([v], lr=1e-3, weight_decay=1e-5)
-lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-    optimiser, T_max=100, eta_min=1e-5
-)
-
-#@torch.no_grad()
-def encode_to_latent(im_tensor):
-    im_tensor = im_tensor.to(device=device, dtype=model_dtype)
-    z = pipe.vae.encode(im_tensor).latent_dist.sample().to(model_dtype)
-    
-    scaling = torch.tensor(
-        pipe.vae.config.scaling_factor,
-        device=device,
-        dtype=model_dtype
-    )
-    
-    return z * scaling
-
+# ----------------------------
+# Training step
+# ----------------------------
+@torch.enable_grad()
 def training_step(edge_map, gt_img):
-    B = edge_map.shape[0]  # batch size
+    B = edge_map.shape[0]
+
     z_gt = encode_to_latent(gt_img)
 
-    # Repeat the learned prompt embedding
-    v_cond = v.repeat(B, 1, 1).to(device=device, dtype=model_dtype)
+    # CHANGED: all three tokens in the prompt
+    prompts = ["<KAIST-1> <KAIST-2> <KAIST-3> urban scene"] * B
+    e_cond = get_text_embeddings(prompts)
 
-    # --- TIMESTEPS (long for indexing) ---
-    t_idx = torch.randint(0, len(scheduler.timesteps), (B,), device="cpu")  # CPU long indices
-    timesteps = scheduler.timesteps[t_idx].to(device=device)  # keep long for scheduler
-    timesteps_float = timesteps.to(dtype=torch.float32)       # float32 for MPS arithmetic
+    t_idx = torch.randint(50, len(scheduler.timesteps), (B,), device="cpu")
+    timesteps = scheduler.timesteps[t_idx].to(device=device)
 
-    # --- NOISE ---
-    noise = torch.randn_like(z_gt, dtype=torch.float32)
+    noise = torch.randn_like(z_gt)
+    z_noisy = scheduler.add_noise(z_gt, noise, timesteps)
 
-    # Add noise to latent
-    z_noisy = scheduler.add_noise(z_gt, noise, timesteps)  # timesteps must be long
-    z_noisy = z_noisy.to(dtype=model_dtype)  # UNet expects model_dtype
+    with torch.inference_mode(False):
+        z_noisy_ = z_noisy.clone()
+        e_cond_  = e_cond.clone()
+        edge_    = edge_map.to(dtype=model_dtype).clone()
 
-    # ControlNet forward (no grad for memory)
-    with torch.no_grad():
         down_block_res, mid_block_res = controlnet(
-            z_noisy,
-            timesteps_float,  # use float for MPS ops
-            encoder_hidden_states=v_cond,
-            controlnet_cond=edge_map.to(dtype=model_dtype),
+            z_noisy_,
+            timesteps.to(dtype=model_dtype),
+            encoder_hidden_states=e_cond_,
+            controlnet_cond=edge_,
             return_dict=False
         )
 
-    # UNet prediction
-    noise_pred = pipe.unet(
-        z_noisy,
-        timesteps_float,  # float for MPS
-        encoder_hidden_states=v_cond,
-        down_block_additional_residuals=down_block_res,
-        mid_block_additional_residual=mid_block_res,
-    ).sample
+        down_block_res = [r.clone() for r in down_block_res]
+        mid_block_res  = mid_block_res.clone()
 
-    # Compute loss
-    L_latent = F.mse_loss(noise_pred.float(), noise.float())
-    target_seed = seed_embeddings.detach().to(device=v.device, dtype=v.dtype)
-    L_reg = 0.01 * F.mse_loss(v[0], target_seed[0])
+        noise_pred = pipe.unet(
+            z_noisy_,
+            timesteps.to(dtype=model_dtype),
+            encoder_hidden_states=e_cond_,
+            down_block_additional_residuals=down_block_res,
+            mid_block_additional_residual=mid_block_res,
+        ).sample
 
-    return L_latent + L_reg
+    loss = F.mse_loss(noise_pred.float(), noise.float())
+    return loss
 
-def train(dataloader: DataLoader, n_epochs: int = 100):
+
+# ----------------------------
+# Training loop
+# ----------------------------
+
+def train(dataloader, n_epochs=50):
     best_loss = float("inf")
-    best_v = None
+
+    # ADDED: track embedding drift from initialisation
+    initial_embeddings = [
+        embedding_layer.weight[tid].detach().clone()
+        for tid in placeholder_token_ids
+    ]
 
     for epoch in range(n_epochs):
         epoch_loss = 0.0
 
-        for edge_maps, rgb_targets in dataloader:
-            edge_maps   = edge_maps.to(device)
-            rgb_targets = rgb_targets.to(device)
+        for batch in dataloader:
+            edge_maps = batch["edge_sd"].to(device)
+            rgb_targets = batch["visible_sd"].to(device)
 
             optimiser.zero_grad()
             loss = training_step(edge_maps, rgb_targets)
             loss.backward()
 
-            # Gradient clipping prevents v from jumping out of semantic space
-            torch.nn.utils.clip_grad_norm_([v], max_norm=1.0)
+            # CHANGED: mask gradients for all placeholder token ids
+            with torch.no_grad():
+                grads = embedding_layer.weight.grad
+                mask = torch.zeros_like(grads)
+                for token_id in placeholder_token_ids:  # CHANGED
+                    mask[token_id] = 1.0
+                embedding_layer.weight.grad *= mask
+
+            torch.nn.utils.clip_grad_norm_(embedding_layer.parameters(), 1.0)
             optimiser.step()
 
             epoch_loss += loss.item()
 
         avg = epoch_loss / len(dataloader)
-        lr_scheduler.step()
+
+        # ADDED: drift logging per token
+        with torch.no_grad():
+            for i, (tid, init_emb) in enumerate(zip(placeholder_token_ids, initial_embeddings)):
+                current = embedding_layer.weight[tid]
+                drift = (current - init_emb).norm().item()
+                cos_sim = F.cosine_similarity(
+                    current.unsqueeze(0), init_emb.unsqueeze(0)
+                ).item()
+                print(f"  token-{i+1} drift={drift:.4f} cos_sim={cos_sim:.4f}")
 
         if avg < best_loss:
             best_loss = avg
-            best_v = v.detach().clone()
-            torch.save(best_v, f"best_v_epoch{epoch}.pt")
+            # CHANGED: save all token embeddings
+            learned_embeddings = [
+                embedding_layer.weight[tid].detach().cpu()
+                for tid in placeholder_token_ids
+            ]
+            torch.save(learned_embeddings, "weights/best_KAIST_tokens.pt")
 
-        print(f"[{epoch:03d}] avg loss={avg:.5f}  lr={optimiser.param_groups[0]['lr']:.2e}")
+        print(f"[{epoch:03d}] avg loss={avg:.5f}  best={best_loss:.5f}")
 
-    return best_v
+
+# ----------------------------
+# Dataset
+# ----------------------------
 
 dataset = EdgeToImageDataset(
     data_path=Path("/Volumes/Samsung_1TB/thermal_images/archive"),
-    image_size=128
+    image_size=256
 )
 
 dataloader = DataLoader(
     dataset,
-    batch_size=4,
+    batch_size=1,
     shuffle=True,
     num_workers=0
 )
 
-best_prompt_embedding = train(dataloader, n_epochs=100)
+train(dataloader, n_epochs=50)

@@ -7,7 +7,7 @@ from torchvision import transforms
 from scipy import ndimage
 import numpy as np 
 from PIL import Image
-import matplotlib.pyplot as plt
+#import matplotlib.pyplot as plt
 
 from src.preprocess.run import Network  # sniklauss file for pytorch HED
 

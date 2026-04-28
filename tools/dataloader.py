@@ -63,9 +63,9 @@ class EdgeToImageDataset(torch.utils.data.Dataset):
         #print(f"Thermal image shape: {thermal_img.size}")
         
         return {
-            'thermal_sd': self.sd_transform(thermal_img),
-            'visible_sd': self.sd_transform(visible_img),
-            'edge_sd': self.sd_transform(edge_map_three),
+            'thermal_sd': self.raw_transform(thermal_img),
+            'visible_sd': self.raw_transform(visible_img),
+            'edge_sd': self.raw_transform(edge_map_three),
             'thermal_raw': self.raw_transform(thermal_img),
             'edge_raw': self.raw_transform(edge_map_one),
             'name' : thermal_path.parents[2].name + "_" + thermal_path.parents[1].name + "_" + thermal_path.stem
@@ -81,7 +81,7 @@ class EdgeToImageDataset(torch.utils.data.Dataset):
             
                 if thermal_path.exists():
                     pairs.append((visible_path, thermal_path))
-        return pairs[:32]  # Limit to first 32 pairs for now
+        return pairs[:100]  # Limit to first 100 pairs for now
     
     def process_image(self, img):
         denoised = cv2.bilateralFilter(img, 9, 75, 75)

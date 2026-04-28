@@ -37,7 +37,7 @@ model_dtype = next(pipe.unet.parameters()).dtype
 # Textual inversion setup — CHANGED: multiple tokens
 # ----------------------------
 
-placeholder_tokens = ["<thermal-1>", "<thermal-2>", "<thermal-3>"] 
+placeholder_tokens = ["<KAIST-1>", "<KAIST-2>", "<KAIST-3>"] 
 num_added = pipe.tokenizer.add_tokens(placeholder_tokens)           
 assert num_added == len(placeholder_tokens), "Tokens already exist" 
 
@@ -76,7 +76,7 @@ embedding_layer.weight.requires_grad = True
 
 optimiser = torch.optim.Adam(
     embedding_layer.parameters(),
-    lr=1e-3
+    lr=5e-4
 )
 
 
@@ -101,6 +101,8 @@ def get_text_embeddings(prompts):
     return pipe.text_encoder(**tokens).last_hidden_state
 
 
+SEED_PROMPT = "scene, high resolution, 8k, sharp, structured"
+
 # ----------------------------
 # Training step
 # ----------------------------
@@ -111,7 +113,7 @@ def training_step(edge_map, gt_img):
     z_gt = encode_to_latent(gt_img)
 
     # CHANGED: all three tokens in the prompt
-    prompts = ["<KAIST-1> <KAIST-2> <KAIST-3> urban scene"] * B
+    prompts = ["<KAIST-1> <KAIST-2> <KAIST-3> " + SEED_PROMPT] * B
     e_cond = get_text_embeddings(prompts)
 
     t_idx = torch.randint(50, len(scheduler.timesteps), (B,), device="cpu")
@@ -204,7 +206,7 @@ def train(dataloader, n_epochs=50):
                 embedding_layer.weight[tid].detach().cpu()
                 for tid in placeholder_token_ids
             ]
-            torch.save(learned_embeddings, "weights/best_KAIST_tokens.pt")
+            torch.save(learned_embeddings, "weights/best_KAIST_tokens_big.pt")
 
         print(f"[{epoch:03d}] avg loss={avg:.5f}  best={best_loss:.5f}")
 
@@ -220,7 +222,7 @@ dataset = EdgeToImageDataset(
 
 dataloader = DataLoader(
     dataset,
-    batch_size=1,
+    batch_size=4,
     shuffle=True,
     num_workers=0
 )

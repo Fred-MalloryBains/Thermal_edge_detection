@@ -78,11 +78,12 @@ if __name__ == "__main__":
     pipe, device, dtype = init()
     delta = torch.load("best_thermal_token.pt", map_location=device) 
     pipe, token_name = load_textual_inversion(pipe, device, "best_thermal_token.pt")
+    
     generate(
         pipe=pipe,
         device=device,
         dtype=dtype,
         token_name=token_name,
-        input_path="debug/ep5_set01_V005_I00150_fused.png",
-        output_path="outputs/reconstruction_hed/recon_thermal_v3.png"
+        input_path="outputs/edges_hed_custom/edges_hedI01029.png",
+        output_path="outputs/reconstruction_hed/recon_thermal_tokens.png"
     )

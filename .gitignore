@@ -1,6 +1,5 @@
 .venv/
 .obj/
-*.png
 *.jpg
 *.caffemodel
 __pycache__/

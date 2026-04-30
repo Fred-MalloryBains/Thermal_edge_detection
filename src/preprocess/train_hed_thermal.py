@@ -6,7 +6,7 @@ from PIL import Image
 import numpy as np
 import sys
 sys.path.insert(0, '.')
-from src.preprocess.run import Network  # sniklauss file for pytorch HED
+from preprocess.base_hed import Network  # sniklauss file for pytorch HED
 from tools.dataloader import EdgeToImageDataset
 from scipy.ndimage import distance_transform_edt
 
@@ -190,7 +190,7 @@ def train(dataset):
 
         if val_loss < best_val:
             best_val = val_loss
-            torch.save(model.state_dict(), "hed_thermal_v2.pth")
+            torch.save(model.state_dict(), "weights/hed_thermal.pth")
             print(f"  saved (val={val_loss:.4f})")
             
 if __name__ == "__main__":

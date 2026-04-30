@@ -71,12 +71,10 @@ def generate(pipe, device, dtype, input_path, output_path, token_names=None):
     # ---- Reconstruct seed_emb exactly as in training ----
 
     SEED_PROMPT_NT = "photorealistic urban scene, high resolution, 8k, sharp, structured" # must match training
-    SEED_PROMPT = "colour photo"
     NEGATIVE_PROMPT_NT = """
     blurry, low quality, deformed, cartoon, painting, illustration,
     oversaturated, monochrome, distorted geometry
     """
-    NEGATIVE_PROMPT = ""
 
     if token_names:
         token_string = " ".join(token_names)

@@ -8,22 +8,25 @@ import sys
 
 # Ensure Python can find your Network class
 sys.path.insert(0, '.')
-from src.preprocess.run import Network
+from preprocess.base_hed import Network
 
 from torchvision import transforms
 
 
 # 1. GLOBAL PYTORCH INITIALIZATION
 
-device = torch.device("mps" if torch.backends.mps.is_available() else "cuda" if torch.cuda.is_available() else "cpu")
+def init():
+    device = torch.device("mps" if torch.backends.mps.is_available() else "cuda" if torch.cuda.is_available() else "cpu")
 
-# Load the custom architecture and weights
-pytorch_net = Network().to(device)
-weights_path = "hed_thermal.pth"
+    # Load the custom architecture and weights
+    pytorch_net = Network().to(device)
+    weights_path = "weights/hed_thermal.pth"
 
-# Load weights and set to eval mode 
-pytorch_net.load_state_dict(torch.load(weights_path, map_location=device))
-pytorch_net.eval() 
+    # Load weights and set to eval mode 
+    pytorch_net.load_state_dict(torch.load(weights_path, map_location=device))
+    pytorch_net.eval() 
+    
+    return device, pytorch_net
 
 
 
@@ -60,7 +63,7 @@ def raw_transform(img):
 
 # 3. THE NEW PYTORCH INFERENCE FUNCTION
 
-def process_edge_pytorch(img_path):
+def process_edge_pytorch(img_path, pytorch_net, device):
     # 1. Read and preprocess
     img = cv2.imread(str(img_path), cv2.IMREAD_GRAYSCALE)
     
@@ -97,13 +100,14 @@ def run():
     # Create output dir if it doesn't exist
     os.makedirs("outputs/edges_hed", exist_ok=True)
 
+    device, pytorch_net = init()
+
     for i, (visible_path, thermal_path) in enumerate(pairs[:10]):
         print(f"Processing pair {i+1}/{len(pairs)}: {visible_path}")
-        
-        # Call the new PyTorch function
-        #edge_map = process_edge_pytorch(thermal_path)
-        #outputs = post_process(edge_map)
-        #Image.fromarray(outputs).save(f"outputs/edges_hed_custom/edges_hed{thermal_path.stem}.png")
+        edge_map = process_edge_pytorch(thermal_path, pytorch_net, device)
+        post_processed = post_process(edge_map)
+        Image.fromarray(post_processed).save(f"outputs/edges_hed_custom/edges_hed{thermal_path.stem}.png")
+
 
 if __name__ == "__main__":
     run()

@@ -4,7 +4,7 @@
  
 This project improves the interpretability of thermal images through a custom-trained edge detection network and textual inversion module, targeting practical applications such as **low-light surveillance** and **autonomous vehicles**.
  
-![Pipeline Overview](figures/pipeline_overview.png)
+![Pipeline Overview](figures/Pipeline_overview.png)
  
 ---
  
@@ -18,6 +18,8 @@ Together, these enable an end-to-end translation from raw thermal images to perc
  
 ---
  
+![ControlNet](figures/best_grid.png)
+
 ## Getting Started
  
 ### Prerequisites

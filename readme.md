@@ -97,7 +97,6 @@ A custom token was trained to capture scene semantics for Stable Diffusion promp
 │   │   ├── edge_detector_custom_hed.py
 │   │   └── train_hed_thermal.py
 │   └── reconstruction_module
-│       ├── text_inversion.py
 │       ├── token_reconstruction.py
 │       └── train_prompt.py
 ├── tools

@@ -115,4 +115,4 @@ A custom token was trained to capture scene semantics for Stable Diffusion promp
 - **ControlNet** — Adding Conditional Control to Text-to-Image Diffusion Models, [zhang et al](https://arxiv.org/abs/2302.05543)
 - **Textual Inversion** — An Image is Worth One Word: Personalizing Text-to-Image Generation using Textual Inversion [gal et al](https://arxiv.org/abs/2208.01618)
 - **Holistically-Nested Edge Detection (HED)** — Holistically-Nested Edge Detection, [Xie & Tu](https://arxiv.org/abs/1504.06375)
-- **Base HED Model** — [snikklaus]((https://github.com/sniklaus/pytorch-hed))
+- **Base HED Model** — [snikklaus](https://github.com/sniklaus/pytorch-hed)

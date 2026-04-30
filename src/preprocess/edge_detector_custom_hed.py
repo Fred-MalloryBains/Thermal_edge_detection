@@ -40,7 +40,8 @@ def get_pairs(data_path):
 
 
 def preprocess_image_two(thermal_img):
-    denoised = cv2.bilateralFilter(thermal_img, 9, 75, 75)
+    #denoised = cv2.bilateralFilter(thermal_img, 9, 75, 75)
+    denoised = thermal_img
     clahe_low = cv2.createCLAHE(clipLimit=1.0, tileGridSize=(8,8)).apply(denoised)
     clahe_mid = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8)).apply(denoised)
     clahe_high = cv2.createCLAHE(clipLimit=4.0, tileGridSize=(8,8)).apply(denoised)
@@ -75,7 +76,7 @@ def process_edge_pytorch(img_path):
         outputs = pytorch_net(tensor_img)
         fused = outputs[-1] if isinstance(outputs, tuple) else outputs
         fused = torch.sigmoid(fused)  # Ensure output is in [0, 1] range
-        #fused = torch.where(fused > 0.2, fused, torch.zeros_like(fused))
+        fused = torch.where(fused > 0.05, fused, torch.zeros_like(fused))
 
     # 5. Post-process back to OpenCV format
     # Move to CPU, remove batch/channel dims, and scale back to uint8
@@ -105,4 +106,7 @@ def run():
         Image.fromarray(edge_map).save(f"outputs/edges_hed_custom/edges_hed{thermal_path.stem}.png")
 
 if __name__ == "__main__":
-    run()
+    input_image = "outputs/final_comparison/thermal/I01035.png"
+    edge_map = process_edge_pytorch(input_image)
+    outputs = post_process(edge_map)
+    Image.fromarray(outputs).save("outputs/final_comparison/edges/I01035.png")

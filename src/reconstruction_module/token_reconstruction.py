@@ -46,8 +46,10 @@ def load_textual_inversion(pipe,device, delta_path):
 
 def generate(pipe, device, dtype, token_name, input_path, output_path):
     # ---- Reconstruct seed_emb exactly as in training ----
-    SEED_PROMPT = "photorealistic urban scene, high resolution, 8k, sharp, structured"  # must match training
-    negative_prompt = """
+
+    SEED_PROMPT_NT = "photo of an urban car park scene, high resolution, 8k, sharp, structured" # must match training
+    SEED_PROMPT = "colour photo"
+    NEGATIVE_PROMPT_NT = """
     blurry, low quality, deformed, cartoon, painting, illustration,
     oversaturated, monochrome, distorted geometry
     """
@@ -72,13 +74,15 @@ def generate(pipe, device, dtype, token_name, input_path, output_path):
     
 if __name__ == "__main__":
     pipe, device, dtype = init()
-    delta = torch.load("best_thermal_token.pt", map_location=device) 
-    pipe, token_name = load_textual_inversion(pipe, device, "best_thermal_token.pt")
+
+    pipe, token_names = load_textual_inversion(pipe, device, "weights/best_KAIST_tokens_big.pt")
+
     generate(
         pipe=pipe,
         device=device,
         dtype=dtype,
-        token_name=token_name,
-        input_path="debug/ep5_set01_V005_I00150_fused.png",
-        output_path="outputs/reconstruction_hed/recon_thermal_v3.png"
+        token_names=None,
+        input_path="outputs/final_comparison/edges/thermal_I00000.png",
+        #input_path = "debug/ep0_set01_V005_I00150_fused.png",
+        output_path="outputs/final_comparison/recon/I00000.png"
     )

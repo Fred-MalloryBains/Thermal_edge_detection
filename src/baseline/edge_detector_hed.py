@@ -15,12 +15,12 @@ from src.preprocess.run import Network  # sniklauss file for pytorch HED
 def raw_transform(image):
     return transforms.Compose([
         transforms.Resize((512, 512)),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]),
+        transforms.ToTensor()   
     ])(image)
 
 def process_image(self, img):
         denoised = cv2.bilateralFilter(img, 9, 75, 75)
+        #denoised = img
         clahe_low = cv2.createCLAHE(clipLimit=1.0, tileGridSize=(8,8)).apply(denoised)
         clahe_mid = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8)).apply(denoised)
         clahe_high = cv2.createCLAHE(clipLimit=4.0, tileGridSize=(8,8)).apply(denoised)
@@ -49,15 +49,35 @@ if __name__ == "__main__":
     
     device = "mps" if torch.backends.mps.is_available() else "cpu"
     
-    visible_path = "outputs/baseline/visible/I00000.jpg"
-    thermal_path = "outputs/baseline/lwir/I00000.jpg"
+    for stem in ["I00000", "I01035", "I02509"]:
+        visible_path = f"outputs/final_comparison/gt/{stem}.png"
+        thermal_path = f"outputs/final_comparison/thermal/{stem}.png"
+
+        model = Network().to(device)
+        model.eval()
+        
+        visible_edge = process_edge_visible(visible_path, model, device)
+        thermal_edge = process_edge_thermal(thermal_path, model, device)
+        
+        #merge = cv2.addWeighted(visible_edge, 0.1, thermal_edge, 0.9, 0)
+        #Image.fromarray(visible_edge).save("outputs/baseline/edges/edges_visible_hed_pipe_2.png")
+        
+        Image.fromarray(thermal_edge).save(f"outputs/final_comparison/base_edges/{stem}_base.png")
+    """
+    data_path = Path("/Volumes/Samsung_1TB/thermal_images/archive/").expanduser() 
+    pairs = get_pairs(data_path)
     
-    model = Network().to(device)
-    model.eval()
-    
-    visible_edge = process_edge(visible_path, model, device)
-    thermal_edge = process_edge(thermal_path, model, device)
-    
-    Image.fromarray(visible_edge).save("outputs/baseline/edges/edges_visible_hed.png")
-    Image.fromarray(thermal_edge).save("outputs/baseline/edges/edges_thermal_hed.png")
+    # Create output dir if it doesn't exist
+    os.makedirs("outputs/edges_hed_comp", exist_ok=True)
+
+    for i, (visible_path, thermal_path) in enumerate(pairs[:10]):
+        print(f"Processing pair {i+1}/{len(pairs)}: {visible_path.name} and {thermal_path.name}")
+        
+        # Call the new PyTorch function
+        gt_edge_map = process_edge_visible(visible_path, model, device)
+        t_egde_map = process_edge_thermal(thermal_path, model, device)
+        
+        Image.fromarray(gt_edge_map).save(f"outputs/edges_hed_comp/edges_hed{visible_path.stem}_gt.png")
+        Image.fromarray(t_egde_map).save(f"outputs/edges_hed_comp/edges_hed{thermal_path.stem}_thermal.png")
+    """
     

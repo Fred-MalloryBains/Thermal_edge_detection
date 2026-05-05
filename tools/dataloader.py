@@ -5,19 +5,12 @@ from PIL import Image
 import numpy as np
 import cv2 
 
-from src.preprocess.run import Network  # sniklauss file for pytorch HED
+from preprocess.base_hed import Network  # sniklauss file for pytorch HED
 
 
 ## loads KAIST dataset and transforms the data into normalised and raw tensors
 ## for both textual inversion and deep learning training
 
-## to-do: add prerprocessing with extra channels for thermal data (CLAHE)
-
-#data_path = Path("/Volumes/Samsung_1TB/thermal_images/archive/").expanduser() 
-#protoPath = "src/preprocess/hed_model/deploy.prototxt"
-#modelPath = "src/preprocess/hed_model/hed_pretrained_bsds.caffemodel"
-
-#net = cv2.dnn.readNetFromCaffe(protoPath, modelPath)
 
 class EdgeToImageDataset(torch.utils.data.Dataset):
     def __init__(self, data_path, image_size=512):
@@ -28,11 +21,6 @@ class EdgeToImageDataset(torch.utils.data.Dataset):
         self.model = Network().to(self.device)
         self.model.eval()
         
-        self.sd_transform = transforms.Compose([
-            transforms.Resize((image_size, image_size)),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]),
-        ])
 
         self.raw_transform = transforms.Compose([
             transforms.Resize((image_size, image_size)),
@@ -44,6 +32,8 @@ class EdgeToImageDataset(torch.utils.data.Dataset):
         return len(self.pairs)
 
     def __getitem__(self, idx):
+        
+        ## data loading logic
         visible_path, thermal_path = self.pairs[idx]
 
         thermal_img = cv2.imread(str(thermal_path), cv2.IMREAD_GRAYSCALE)  
@@ -57,11 +47,7 @@ class EdgeToImageDataset(torch.utils.data.Dataset):
         visible_img = cv2.imread(str(visible_path))
         visible_img = Image.fromarray(visible_img).convert("RGB")
         
-        
-
-        #print(f"Edge map shape: {edge_map_one.size}")
-        #print(f"Thermal image shape: {thermal_img.size}")
-        
+        ## Return tesnored paired data for textual inversion and edge map training
         return {
             'thermal_sd': self.raw_transform(thermal_img),
             'visible_sd': self.raw_transform(visible_img),
@@ -74,24 +60,26 @@ class EdgeToImageDataset(torch.utils.data.Dataset):
     def get_pairs(self, data_path):
         pairs = []
 
+        ## logic for grabbing the image pairs for KAIST, have to be modified for other datasets
         for visible_path in data_path.glob("set*/V*/visible/*.jpg"):
             set_name = visible_path.parents[2].name
-            if set_name in ["set00", "set01", "set02"]:
+            if set_name in ["set00", "set01", "set02", "set03", "set04", "set05"]:
                 thermal_path = visible_path.parents[1] / "lwir" / visible_path.name
             
                 if thermal_path.exists():
                     pairs.append((visible_path, thermal_path))
-        return pairs[:100]  # Limit to first 100 pairs for now
+        return pairs
     
     def process_image(self, img):
-        denoised = cv2.bilateralFilter(img, 9, 75, 75)
-        clahe_low = cv2.createCLAHE(clipLimit=1.0, tileGridSize=(8,8)).apply(denoised)
-        clahe_mid = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8)).apply(denoised)
-        clahe_high = cv2.createCLAHE(clipLimit=4.0, tileGridSize=(8,8)).apply(denoised)
+        ## preprocess the thermal image as done in evaluation
+        clahe_low = cv2.createCLAHE(clipLimit=1.0, tileGridSize=(8,8)).apply(img)
+        clahe_mid = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8)).apply(img)
+        clahe_high = cv2.createCLAHE(clipLimit=4.0, tileGridSize=(8,8)).apply(img)
         pseudo_rgb = cv2.merge([clahe_low, clahe_mid, clahe_high])
         return pseudo_rgb
     
     def crop_and_resize(self, img):
+        ## unused helper function to resize images
         H, W = img.shape[:2]
         margin = 40
         img = img[margin:H-margin, margin:W-margin]
@@ -99,6 +87,7 @@ class EdgeToImageDataset(torch.utils.data.Dataset):
         return img
     
     def process_edge(self, img_path):
+        ## edge detection function using the custom HED model, returns raw edge map without post processing
         img = Image.open(img_path).convert("RGB")
         
         input_tensor = self.raw_transform(img).unsqueeze(0).to(self.device)
@@ -116,12 +105,11 @@ class EdgeToImageDataset(torch.utils.data.Dataset):
         return edge_map
     
     def process_edge_soft (self, img_path):
+        ## preprocess the edge map with some soft post processing 
+        ## to give the model more information during training, this is not used for evaluation
         edge = self.process_edge(img_path)
         
         edge = edge.astype(np.float32) / 255.0
-        
-        #kernel = np.ones((3,3), np.uint8)
-        #edge = cv2.dilate(edge, kernel, iterations=1)
         
         edge = cv2.GaussianBlur(edge, (3,3), 0)
         

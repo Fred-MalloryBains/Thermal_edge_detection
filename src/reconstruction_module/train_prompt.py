@@ -33,9 +33,9 @@ pipe.vae.scaling_factor = 0.18215
 model_dtype = next(pipe.unet.parameters()).dtype
 
 
-# ----------------------------
-# Textual inversion setup — CHANGED: multiple tokens
-# ----------------------------
+
+# Textual inversion setup: multiple tokens
+
 
 placeholder_tokens = ["<KAIST-1>", "<KAIST-2>", "<KAIST-3>"] 
 num_added = pipe.tokenizer.add_tokens(placeholder_tokens)           
@@ -57,9 +57,9 @@ with torch.no_grad():
         embedding_layer.weight[token_id] = embedding_layer.weight[word_id].clone()
 
 
-# ----------------------------
+
 # Freeze all models
-# ----------------------------
+
 for p in pipe.unet.parameters():
     p.requires_grad = False
 
@@ -103,16 +103,16 @@ def get_text_embeddings(prompts):
 
 SEED_PROMPT = "scene, high resolution, 8k, sharp, structured"
 
-# ----------------------------
+
 # Training step
-# ----------------------------
+
 @torch.enable_grad()
 def training_step(edge_map, gt_img):
     B = edge_map.shape[0]
 
     z_gt = encode_to_latent(gt_img)
 
-    # CHANGED: all three tokens in the prompt
+    # all three tokens in the prompt
     prompts = ["<KAIST-1> <KAIST-2> <KAIST-3> " + SEED_PROMPT] * B
     e_cond = get_text_embeddings(prompts)
 
@@ -138,6 +138,7 @@ def training_step(edge_map, gt_img):
         down_block_res = [r.clone() for r in down_block_res]
         mid_block_res  = mid_block_res.clone()
 
+        # sample the noise residual with the controlnet conditioning
         noise_pred = pipe.unet(
             z_noisy_,
             timesteps.to(dtype=model_dtype),
@@ -150,14 +151,14 @@ def training_step(edge_map, gt_img):
     return loss
 
 
-# ----------------------------
+
 # Training loop
-# ----------------------------
+
 
 def train(dataloader, n_epochs=50):
     best_loss = float("inf")
 
-    # ADDED: track embedding drift from initialisation
+    # track embedding drift from initialisation
     initial_embeddings = [
         embedding_layer.weight[tid].detach().clone()
         for tid in placeholder_token_ids
@@ -174,11 +175,11 @@ def train(dataloader, n_epochs=50):
             loss = training_step(edge_maps, rgb_targets)
             loss.backward()
 
-            # CHANGED: mask gradients for all placeholder token ids
+            # mask gradients for all placeholder token ids
             with torch.no_grad():
                 grads = embedding_layer.weight.grad
                 mask = torch.zeros_like(grads)
-                for token_id in placeholder_token_ids:  # CHANGED
+                for token_id in placeholder_token_ids:  
                     mask[token_id] = 1.0
                 embedding_layer.weight.grad *= mask
 
@@ -189,7 +190,7 @@ def train(dataloader, n_epochs=50):
 
         avg = epoch_loss / len(dataloader)
 
-        # ADDED: drift logging per token
+        # track embedding drift from initialisation
         with torch.no_grad():
             for i, (tid, init_emb) in enumerate(zip(placeholder_token_ids, initial_embeddings)):
                 current = embedding_layer.weight[tid]
@@ -201,7 +202,7 @@ def train(dataloader, n_epochs=50):
 
         if avg < best_loss:
             best_loss = avg
-            # CHANGED: save all token embeddings
+            # save all token embeddings
             learned_embeddings = [
                 embedding_layer.weight[tid].detach().cpu()
                 for tid in placeholder_token_ids
@@ -211,15 +212,15 @@ def train(dataloader, n_epochs=50):
         print(f"[{epoch:03d}] avg loss={avg:.5f}  best={best_loss:.5f}")
 
 
-# ----------------------------
 # Dataset
-# ----------------------------
+
 
 dataset = EdgeToImageDataset(
     data_path=Path("/Volumes/Samsung_1TB/thermal_images/archive"),
     image_size=256
 )
 
+## configuration based on computer size, feel free to modify
 dataloader = DataLoader(
     dataset,
     batch_size=4,
@@ -227,4 +228,5 @@ dataloader = DataLoader(
     num_workers=0
 )
 
+## 50 epochs is plenty in this case
 train(dataloader, n_epochs=50)

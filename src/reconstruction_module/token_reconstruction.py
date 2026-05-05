@@ -21,11 +21,13 @@ def init():
         torch_dtype=dtype
     )
 
+    # Load stable diffusion pipeline with controlnet
     pipe = StableDiffusionControlNetPipeline.from_pretrained(
         "runwayml/stable-diffusion-v1-5",
         controlnet=controlnet,
         torch_dtype=dtype
     )
+    # define scheduler for inference, matching training scheduler
     pipe.scheduler = UniPCMultistepScheduler.from_config(pipe.scheduler.config)
     pipe = pipe.to(device)
 
@@ -33,20 +35,21 @@ def init():
 
 
 def load_textual_inversion(pipe,device, delta_path):
-
+    # create arbitrary token names for the 3 learned embeddings, these must match the token names used during training
     token_names = ["<KAIST-1>", "<KAIST-2>", "<KAIST-3>"]
     delta_list = torch.load(delta_path, map_location=device) # [1, 77, 768]
 
 
-
+    # tokenise the new tokens to get their IDs, and add them to the tokeniser
     pipe.tokenizer.add_tokens(token_names)
     # Resize the embedding layer once
     pipe.text_encoder.resize_token_embeddings(len(pipe.tokenizer))
 
-
+    # no inference grad needed, we are just directly assigning the learned embeddings to the token embedding layer
     with torch.no_grad():
         token_embeddings = pipe.text_encoder.get_input_embeddings()
 
+        # loop through the new tokens and assign the learned embedding deltas to the correct token IDs in the embedding layer
         for token_name, delta in zip(token_names, delta_list):
 
             token_id = pipe.tokenizer.convert_tokens_to_ids(token_name)
@@ -105,6 +108,9 @@ def generate(pipe, device, dtype, input_path, output_path, token_names=None):
     output.save(output_path)
 
     print(f"Saved to {output_path}")
+
+
+# run the reconstruction with the learned tokens using the custom HED edge maps as input
 
 if __name__ == "__main__":
 

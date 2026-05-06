@@ -12,7 +12,7 @@ import torch
 
 from diffusers.utils import load_image
 
-def init():
+def init_reconstruction():
     device = "mps" if torch.backends.mps.is_available() else "cpu"
     # Match training dtype exactly
     dtype = torch.float32
@@ -71,7 +71,7 @@ def load_textual_inversion(pipe,device, delta_path):
 
 def generate(pipe, device, dtype, input_path, output_path, token_names=None):
 
-    # ---- Reconstruct seed_emb exactly as in training ----
+    # Reconstruct seed_emb exactly as in training ----
 
     SEED_PROMPT_NT = "photorealistic urban scene, high resolution, 8k, sharp, structured" # must match training
     NEGATIVE_PROMPT_NT = """
@@ -87,13 +87,13 @@ def generate(pipe, device, dtype, input_path, output_path, token_names=None):
         prompt = SEED_PROMPT_NT
         negative_prompt = NEGATIVE_PROMPT_NT
 
-    # ---- Load edge image ----
+    # Load edge image ----
 
     edge_path = input_path
 
     edge_img = load_image(edge_path).resize((512, 512))
 
-    # ---- Run pipeline ----
+    # Run pipeline ----
 
     output = pipe(
 
@@ -114,7 +114,7 @@ def generate(pipe, device, dtype, input_path, output_path, token_names=None):
 
 if __name__ == "__main__":
 
-    pipe, device, dtype = init()
+    pipe, device, dtype = init_reconstruction()
 
     pipe, token_names = load_textual_inversion(pipe, device, "weights/best_KAIST_tokens.pt")
 

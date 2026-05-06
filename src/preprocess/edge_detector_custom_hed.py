@@ -8,7 +8,7 @@ import sys
 
 # Ensure Python can find your Network class
 sys.path.insert(0, '.')
-from preprocess.base_hed import Network
+from src.preprocess.base_hed import Network
 
 from torchvision import transforms
 

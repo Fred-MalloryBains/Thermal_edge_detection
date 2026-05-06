@@ -9,9 +9,21 @@ import numpy as np
 from PIL import Image
 #import matplotlib.pyplot as plt
 
-from src.preprocess.run import Network  # sniklauss file for pytorch HED
+from src.preprocess.base_hed import Network  # sniklauss file for pytorch HED
 
+def hed_init():
+    device = torch.device("mps" if torch.backends.mps.is_available() else "cuda" if torch.cuda.is_available() else "cpu")
 
+    # Load the custom architecture and weights
+    pytorch_net = Network().to(device)
+   
+
+    # Load weights and set to eval mode 
+    pytorch_net.eval() 
+    
+    return device, pytorch_net
+
+# load dataset logic
 def get_pairs(data_path):
     pairs = []
 
